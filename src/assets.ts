@@ -7,6 +7,7 @@ const robotUrl = import.meta.env.BASE_URL + 'models/robot.glb';
 const gunUrl = import.meta.env.BASE_URL + 'models/g32.glb';
 const enemyUrl = import.meta.env.BASE_URL + 'models/enemy_robot.glb';
 const enemyGunUrl = import.meta.env.BASE_URL + 'models/enemy_gun.glb';
+const enemy2Url = import.meta.env.BASE_URL + 'models/enemy2_robot.glb';
 const mapUrl = import.meta.env.BASE_URL + 'models/map.glb';
 const mapColUrl = import.meta.env.BASE_URL + 'models/map_colliders.json';
 
@@ -18,6 +19,10 @@ export interface Assets {
   enemyGun: GLTF;
   /** Walk, Idle, Death */
   enemyClips: Record<string, THREE.AnimationClip>;
+  /** 두 번째 적(레이저 보행 로봇) */
+  enemy2: GLTF;
+  /** Walk(원본 11초 클립에서 몸통이 정면인 걷기 한 주기) */
+  enemy2Clips: Record<string, THREE.AnimationClip>;
   /** 실제 맵(시험 맵이면 null) */
   map: GLTF | null;
   mapColliders: MapColliders | null;
@@ -29,8 +34,8 @@ const KEEP_TRACK = /(Hips|UpLeg|Leg|Foot|ToeBase|Spine\d?|Hand(Index|Middle|Ring
 export async function loadAssets(withMap: boolean): Promise<Assets> {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  const [robot, gun, enemy, enemyGun, map, mapColliders] = await Promise.all([
-    loader.loadAsync(robotUrl), loader.loadAsync(gunUrl), loader.loadAsync(enemyUrl), loader.loadAsync(enemyGunUrl),
+  const [robot, gun, enemy, enemyGun, enemy2, map, mapColliders] = await Promise.all([
+    loader.loadAsync(robotUrl), loader.loadAsync(gunUrl), loader.loadAsync(enemyUrl), loader.loadAsync(enemyGunUrl), loader.loadAsync(enemy2Url),
     withMap ? loader.loadAsync(mapUrl) : Promise.resolve(null),
     withMap ? fetch(mapColUrl).then((r) => r.json() as Promise<MapColliders>) : Promise.resolve(null),
   ]);
@@ -45,7 +50,9 @@ export async function loadAssets(withMap: boolean): Promise<Assets> {
   const enemyClips: Record<string, THREE.AnimationClip> = {};
   for (const clip of enemy.animations) enemyClips[clip.name] = clip;
   fixEnemyWalkHips(enemyClips);
-  return { robot, gun, clips, enemy, enemyGun, enemyClips, map, mapColliders };
+  // 원본은 24fps 264프레임. 116~148프레임이 몸통이 정면인 걷기 한 주기(두 발이 같은 자리로 돌아온다)
+  const enemy2Clips = { Walk: THREE.AnimationUtils.subclip(enemy2.animations[0], 'Walk', 116, 148, 24) };
+  return { robot, gun, clips, enemy, enemyGun, enemyClips, enemy2, enemy2Clips, map, mapColliders };
 }
 
 /**

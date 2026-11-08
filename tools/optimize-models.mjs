@@ -3,8 +3,8 @@
 // - 텍스처 WebP 변환(색 데이터가 거의 없는 작은 텍스처는 4x4로 축소)
 // - meshopt 압축
 import { NodeIO } from '@gltf-transform/core';
-import { ALL_EXTENSIONS, KHRMaterialsSpecular, EXTMeshoptCompression } from '@gltf-transform/extensions';
-import { dedup, prune, meshopt, textureCompress, weld, flatten, join } from '@gltf-transform/functions';
+import { ALL_EXTENSIONS, KHRMaterialsSpecular, KHRMaterialsIOR, EXTMeshoptCompression } from '@gltf-transform/extensions';
+import { dedup, prune, meshopt, textureCompress, weld, flatten, join, metalRough } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
 import sharp from 'sharp';
 import { statSync } from 'node:fs';
@@ -15,8 +15,14 @@ const io = new NodeIO()
   .registerExtensions(ALL_EXTENSIONS)
   .registerDependencies({ 'meshopt.encoder': MeshoptEncoder, 'meshopt.decoder': MeshoptDecoder });
 
-async function run(src, dst, { maxTex = 1024, merge = false } = {}) {
+async function run(src, dst, { maxTex = 1024, merge = false, specGloss = false } = {}) {
   const doc = await io.read(src);
+  // 옛 spec-gloss 재질(three.js 미지원)을 metal-rough로 바꾼다
+  // (변환이 넣는 ior=1000은 거울처럼 번쩍이게 만들어서 뺀다)
+  if (specGloss) {
+    await doc.transform(metalRough());
+    doc.getRoot().listExtensionsUsed().filter((e) => e.extensionName === KHRMaterialsIOR.EXTENSION_NAME).forEach((e) => e.dispose());
+  }
   doc.getRoot().listExtensionsUsed()
     .filter((e) => e.extensionName === KHRMaterialsSpecular.EXTENSION_NAME)
     .forEach((e) => e.dispose());
@@ -47,3 +53,5 @@ await run('scratch_build/robot_raw.glb', 'public/models/robot.glb');
 await run('scratch_build/enemy_robot_raw.glb', 'public/models/enemy_robot.glb');
 await run('scratch_build/enemy_gun_raw.glb', 'public/models/enemy_gun.glb', { maxTex: 512 });
 await run('scratch_build/map_raw.glb', 'public/models/map.glb', { merge: true });
+// 두 번째 적(레이저 보행 로봇): Sketchfab 원본을 그대로(애니메이션은 런타임에 걷기 한 주기만 잘라 쓴다)
+await run('3d/enermy2_robot.glb', 'public/models/enemy2_robot.glb', { specGloss: true });

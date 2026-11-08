@@ -1,40 +1,45 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Assets } from './assets';
-import { ENEMY } from './config';
+import { ENEMY, type EnemyConfig } from './config';
 import { MuzzleFlash } from './effects';
 import type { Player } from './player';
 import { rotateBoneWorld } from './rig';
 
 /**
- * 적 로봇: 순찰(걷다 서서 두리번거림) -> 발견하면 팔을 들어 조준, 사격 -> 5발 맞으면 주저앉아 회색으로 꺼진다.
- * 모델(enemy_robot.glb)은 로컬 +X를 정면으로 본다. 그래서 model.rotation.y = PI/2로 -Z가 정면이 되게 놓는다.
- * 오른팔(ArmR~HandR)은 코드가 직접 조준하고, 나머지는 클립(Walk/Idle/Death)이 움직인다.
+ * 적 공통 AI(Enemy): 순찰(걷다 서서 두리번거림) -> 발견하면 조준, 공격 -> 체력이 다하면 쓰러져 회색으로 꺼진다.
+ * 몸(모델, 애니메이션, 무기)은 종류별 하위 클래스가 맡는다.
+ * - GunnerEnemy(이 파일): 사람형 로봇, 오른팔로 총을 겨눠 점사
+ * - WalkerEnemy(enemy2.ts): 카메라 몸통 보행 로봇, 렌즈에서 레이저
  */
 
 export type EnemyState = 'walk' | 'look' | 'combat' | 'search' | 'dead';
 
+export type EnemyWeapon = 'bullet' | 'laser';
+
 export interface EnemyHooks {
-  /** 적이 한 발 쐈다. from은 총구, dir은 퍼짐이 적용된 방향 */
-  onFire(e: Enemy, from: THREE.Vector3, dir: THREE.Vector3): void;
+  /** 적이 한 발 쐈다. from은 총구(렌즈), dir은 퍼짐이 적용된 방향 */
+  onFire(e: Enemy, from: THREE.Vector3, dir: THREE.Vector3, kind: EnemyWeapon): void;
+  /** 레이저 충전 시작(소리용) */
+  onCharge?(e: Enemy, from: THREE.Vector3): void;
   onDeath?(e: Enemy): void;
 }
 
-const UP = new THREE.Vector3(0, 1, 0);
+export const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _ray = new THREE.Raycaster();
 
-function bone(root: THREE.Object3D, name: string) {
+export function bone(root: THREE.Object3D, name: string) {
   const b = root.getObjectByName(name);
   if (!b) throw new Error('enemy bone missing: ' + name);
   return b as THREE.Bone;
 }
 
 /** 각도 차이를 -PI..PI로 */
-function angDiff(a: number, b: number) {
+export function angDiff(a: number, b: number) {
   let d = a - b;
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
@@ -47,7 +52,7 @@ function turnToward(cur: number, target: number, maxStep: number) {
 }
 
 /** 적이 다닐 수 있는 범위(맵 경계). Enemies.spawn이 맵에서 받아 설정한다. */
-const AREA = new THREE.Box3(new THREE.Vector3(-43, 0, -43), new THREE.Vector3(43, 5, 43));
+export const AREA = new THREE.Box3(new THREE.Vector3(-43, 0, -43), new THREE.Vector3(43, 5, 43));
 const inArea = (x: number, z: number, margin = 0) =>
   x > AREA.min.x + margin && x < AREA.max.x - margin && z > AREA.min.z + margin && z < AREA.max.z - margin;
 
@@ -64,7 +69,7 @@ export function mulberry32(seed: number) {
 }
 
 /** 사망 시 회색 처리용: 모든 표준 재질에 채도 제거와 밝기 배율 uniform을 넣는다 */
-function patchGrey(mat: THREE.MeshStandardMaterial, u: { uGrey: { value: number } }) {
+export function patchGrey(mat: THREE.MeshStandardMaterial, u: { uGrey: { value: number } }) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uGrey = u.uGrey;
     shader.fragmentShader = shader.fragmentShader
@@ -80,7 +85,7 @@ function patchGrey(mat: THREE.MeshStandardMaterial, u: { uGrey: { value: number 
 }
 
 /** 머리 위 라이프 바(5칸) */
-class LifeBar {
+export class LifeBar {
   sprite: THREE.Sprite;
   private canvas = document.createElement('canvas');
   private tex: THREE.CanvasTexture;
@@ -113,19 +118,18 @@ class LifeBar {
   }
 }
 
-export class Enemy {
-  root = new THREE.Object3D();
-  model: THREE.Object3D;
-  mixer: THREE.AnimationMixer;
-  actions: Record<string, THREE.AnimationAction> = {};
-  gun: THREE.Object3D;
-  muzzle: THREE.Object3D;
-  flash: MuzzleFlash;
-  /** 피격 판정용 보이지 않는 박스(몸통, 머리) */
-  hitBoxes: THREE.Mesh[] = [];
-  lifeBar: LifeBar;
+export type WorldRefs = { hitMeshes: THREE.Object3D[]; colliders: THREE.Box3[] };
 
-  hp = ENEMY.health;
+/** 적 공통: 상태, 순찰, 시야, 전투 판단. 몸을 움직이는 부분(animate)과 무기(attack)는 하위 클래스가 맡는다. */
+export abstract class Enemy {
+  abstract readonly kind: 'gunner' | 'walker';
+  root = new THREE.Object3D();
+  abstract model: THREE.Object3D;
+  /** 피격 판정용 보이지 않는 박스 */
+  hitBoxes: THREE.Mesh[] = [];
+  abstract lifeBar: LifeBar;
+
+  hp: number;
   state: EnemyState = 'look';
   yaw = 0;
   home = new THREE.Vector3();
@@ -133,56 +137,346 @@ export class Enemy {
   /** 시야 안에 플레이어가 보이는지(마지막 검사 결과) */
   seesPlayer = false;
   lastSeen = new THREE.Vector3();
-  /** 팔 들기 0..1 */
+  /** 무기 들기(렌즈 켜기) 0..1 */
   raise = 0;
   aimError = Math.PI;
   speed = 0;
   deathT = -1;
   /** 디버그: 순찰/전투 갱신을 멈춘다(자세 시트 캡처용) */
   frozen = false;
-  /** 오른팔이 겨누는 월드 지점 */
+  /** 무기가 겨누는 월드 지점 */
   aimPoint = new THREE.Vector3();
+
+  protected stateT = 0;
+  protected lookT = 0;
+  /** 머리(몸통)가 몸 정면 기준으로 돌아간 각, 목표, 각속도 */
+  protected headYaw = 0;
+  protected headTarget = 0;
+  protected headVel = 0;
+  /** 상체 비틀림(골반 기준), 목표 */
+  protected twist = 0;
+  protected twistTarget = 0;
+  /** 다음 시선 목표로 넘어가기까지 남은 시간 */
+  protected glanceT = 0;
+  protected glanceSide = 1;
+  /** 이번 프레임 몸 회전 속도(rad/s): 제자리 돌 때 발을 떼게 한다 */
+  protected turnRate = 0;
+  /** 전투 중 몸을 다시 정렬하는 중인지 */
+  protected realign = false;
+  protected sightT: number;
+  protected searchT = 0;
+  protected fireT = 0;
+  protected flinch = 0;
+  protected hitFlash = 0;
+  protected greyU = { uGrey: { value: 0 } };
+  protected rand: () => number;
+  /** 마지막 갱신 때 받은 이동 충돌 박스(쓰러질 방향 고르기 등) */
+  protected colliders: THREE.Box3[] = [];
+
+  constructor(readonly cfg: EnemyConfig, rand: () => number) {
+    this.rand = rand;
+    this.hp = cfg.health;
+    this.sightT = Math.random() * cfg.sightInterval;
+  }
+
+  get alive() {
+    return this.state !== 'dead';
+  }
+
+  forward(out = new THREE.Vector3()) {
+    return out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+  }
+
+  place(x: number, z: number, yaw: number) {
+    this.root.position.set(x, 0, z);
+    this.home.set(x, 0, z);
+    this.yaw = yaw;
+    this.state = 'look';
+    this.lookT = 1 + this.rand() * 2;
+  }
+
+  damage(fromPos: THREE.Vector3, hooks: EnemyHooks) {
+    if (!this.alive) return false;
+    this.hp--;
+    this.hitFlash = 0.12;
+    this.flinch = 1;
+    if (this.hp <= 0) {
+      this.die(hooks);
+      return true;
+    }
+    // 맞으면 쏜 쪽을 안다
+    if (this.state !== 'combat') {
+      this.state = 'combat';
+      this.lastSeen.copy(fromPos);
+      this.onEngage();
+      this.fireT = 0.4;
+    }
+    this.searchT = this.cfg.searchTime;
+    return false;
+  }
+
+  die(hooks?: EnemyHooks) {
+    this.state = 'dead';
+    this.hp = 0;
+    this.deathT = 0;
+    this.speed = 0;
+    for (const b of this.hitBoxes) b.removeFromParent();
+    hooks?.onDeath?.(this);
+  }
+
+  /** world: 레이캐스트 대상(정적), colliders: 이동 충돌 */
+  update(dt: number, player: Player, playerHead: THREE.Vector3, world: WorldRefs, hooks: EnemyHooks) {
+    this.colliders = world.colliders;
+    this.hitFlash = Math.max(0, this.hitFlash - dt);
+    this.flinch = Math.max(0, this.flinch - dt * 5);
+    this.weaponTick(dt, hooks);
+    if (this.alive && !this.frozen) this.think(dt, player, playerHead, world, hooks);
+    // 조준점: 전투 중이면 플레이어 가슴, 수색 중이면 마지막으로 본 곳, 평소에는 앞쪽 수평
+    const aim = this.aimPoint;
+    if (this.state === 'search') aim.set(this.lastSeen.x, this.lastSeen.y + 1.3, this.lastSeen.z);
+    else if (this.state === 'combat') aim.set(player.pos.x, (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
+    else this.forward(aim).multiplyScalar(5).add(this.root.position).setY(this.root.position.y + this.idleAimHeight());
+    this.animate(dt, aim);
+    // 라이프 바: 맞은 직후 흰색으로 반짝인다
+    if (this.alive) this.lifeBar.draw(this.hp, this.cfg.health, this.hitFlash);
+    this.lifeBar.sprite.visible = this.alive;
+  }
+
+  /** 눈(시야 원점) 월드 위치 */
+  protected abstract eyePosition(out: THREE.Vector3): THREE.Vector3;
+  /** 평소(경계) 조준 높이(발 기준 m) */
+  protected abstract idleAimHeight(): number;
+  /** 클립 + 절차적 자세 */
+  protected abstract animate(dt: number, aim: THREE.Vector3): void;
+  /** 조준이 맞았을 때 공격 한 번. 다음 공격까지의 시간을 돌려준다. */
+  protected abstract attack(player: Player, playerHead: THREE.Vector3, hooks: EnemyHooks): number;
+  /** 전투 시작(점사 수 초기화 등) */
+  protected onEngage() {}
+  /** 매 프레임 무기 상태(섬광, 반동, 충전) */
+  protected weaponTick(_dt: number, _hooks: EnemyHooks) {}
+
+  private think(dt: number, player: Player, playerHead: THREE.Vector3, world: WorldRefs, hooks: EnemyHooks) {
+    const C = this.cfg;
+    const pos = this.root.position;
+    // 시야 검사(주기적으로)
+    this.sightT -= dt;
+    if (this.sightT <= 0) {
+      this.sightT = C.sightInterval;
+      this.seesPlayer = this.canSee(playerHead, world.hitMeshes);
+      if (this.seesPlayer) {
+        this.lastSeen.copy(player.pos);
+        if (this.state !== 'combat') {
+          this.state = 'combat';
+          this.onEngage();
+          this.fireT = 0.25;
+        }
+        this.searchT = C.searchTime;
+      }
+    }
+
+    if (this.state === 'combat' || this.state === 'search') {
+      this.speed = 0;
+      // 보이는 동안은 지금 위치, 안 보이면 마지막으로 본 곳
+      const tgt = this.seesPlayer ? player.pos : this.lastSeen;
+      const want = Math.atan2(-(tgt.x - pos.x), -(tgt.z - pos.z));
+      // 작은 움직임은 상체와 무기로만 따라가고, 많이 벗어나면 발을 떼서 몸을 정렬한다(정렬이 끝날 때까지)
+      const off = Math.abs(angDiff(want, this.yaw));
+      if (off > C.realignAngle) this.realign = true;
+      if (this.realign) {
+        const rate = off > C.twistMax * 0.8 ? C.combatTurnSpeed : C.combatTurnSpeed * 0.6;
+        this.turnBody(want, rate, dt);
+        if (Math.abs(angDiff(want, this.yaw)) < THREE.MathUtils.degToRad(3)) this.realign = false;
+      } else {
+        this.turnRate = 0;
+      }
+      const rest = angDiff(want, this.yaw);
+      this.twistTarget = THREE.MathUtils.clamp(rest, -C.twistMax, C.twistMax);
+      this.headTarget = THREE.MathUtils.clamp(rest, -C.headMax, C.headMax);
+      if (!this.seesPlayer) {
+        this.searchT -= dt;
+        this.state = 'search';
+        if (this.searchT <= 0) {
+          this.state = 'look';
+          this.lookT = THREE.MathUtils.lerp(C.lookTime[0], C.lookTime[1], this.rand());
+          this.stateT = 0;
+          this.glanceT = 0.6;
+        }
+      } else {
+        this.state = 'combat';
+      }
+      // 무기는 전투/수색 중 들고 있고, 공격은 보이고 조준됐을 때만
+      this.raise = Math.min(1, this.raise + dt / C.raiseTime);
+      this.fireT -= dt;
+      if (this.state === 'combat' && this.raise >= 1 && this.aimError < C.fireAngle && this.fireT <= 0) {
+        this.fireT = this.attack(player, playerHead, hooks);
+      }
+      return;
+    }
+
+    this.raise = Math.max(0, this.raise - dt / 0.6);
+    this.stateT += dt;
+    if (this.state === 'look') {
+      // 서서 좌우로 두리번거린다
+      this.speed = Math.max(0, this.speed - dt * 3);
+      this.turnRate = 0;
+      this.twistTarget = 0;
+      this.scan(dt, C.headMax, 0.3);
+      this.lookT -= dt;
+      if (this.lookT <= 0) this.pickWaypoint(world.colliders);
+    } else if (this.state === 'walk') {
+      const to = _v.subVectors(this.waypoint, pos).setY(0);
+      const dist = to.length();
+      const want = Math.atan2(-to.x, -to.z);
+      this.turnBody(want, C.turnSpeed, dt);
+      this.twistTarget = 0;
+      const align = Math.max(0, Math.cos(angDiff(want, this.yaw)));
+      const target = C.patrolSpeed * THREE.MathUtils.smoothstep(align, 0.7, 1) * Math.min(1, dist / 0.6 + 0.3);
+      this.speed += (target - this.speed) * (1 - Math.exp(-6 * dt));
+      // 걸을 때는 가끔 옆을 힐끗 본다
+      this.scan(dt, THREE.MathUtils.degToRad(30), 0.55);
+      const step = this.forward(_v2).multiplyScalar(this.speed * dt);
+      const next = _v3.copy(pos).add(step);
+      if (this.blocked(next, world.colliders)) {
+        this.state = 'look';
+        this.lookT = 1.5 + this.rand() * 2;
+        this.stateT = 0;
+        this.glanceT = 0.5;
+      } else {
+        pos.copy(next);
+      }
+      if (dist < 0.35) {
+        this.state = 'look';
+        this.lookT = THREE.MathUtils.lerp(C.lookTime[0], C.lookTime[1], this.rand());
+        this.stateT = 0;
+        this.glanceT = 0.5;
+      }
+    }
+  }
+
+  /** 몸(다리) 방향을 돌리고, 회전 속도를 기록한다(제자리 발걸음용) */
+  protected turnBody(want: number, rate: number, dt: number) {
+    const before = this.yaw;
+    this.yaw = turnToward(this.yaw, want, rate * dt);
+    this.turnRate = dt > 0 ? Math.abs(angDiff(this.yaw, before)) / dt : 0;
+  }
+
+  /** 고개(몸통) 스프링: 사람처럼 가속/감속(목표가 바뀌어도 순간이동하지 않는다) */
+  protected springHead(dt: number) {
+    const k = this.cfg.headSpring;
+    this.headVel += (k * k * (this.headTarget - this.headYaw) - 2 * k * this.headVel) * dt;
+    this.headYaw += this.headVel * dt;
+    this.twist += (this.twistTarget - this.twist) * (1 - Math.exp(-8 * dt));
+  }
+
+  /**
+   * 사람처럼 둘러보기: 한쪽을 보고 잠깐 멈췄다가 반대쪽, 가끔 정면.
+   * max: 좌우 최대 각, centerChance: 다음 시선이 정면일 확률
+   */
+  private scan(dt: number, max: number, centerChance: number) {
+    // 머리가 목표에 거의 닿은 뒤부터 멈춤 시간을 센다
+    if (Math.abs(this.headTarget - this.headYaw) < 0.06) this.glanceT -= dt;
+    if (this.glanceT > 0) return;
+    this.glanceT = THREE.MathUtils.lerp(this.cfg.glanceHold[0], this.cfg.glanceHold[1], this.rand());
+    if (this.headTarget !== 0 && this.rand() < centerChance) {
+      this.headTarget = 0;
+    } else {
+      this.glanceSide = -this.glanceSide;
+      this.headTarget = this.glanceSide * max * THREE.MathUtils.lerp(0.6, 1, this.rand());
+    }
+  }
+
+  private pickWaypoint(colliders: THREE.Box3[]) {
+    for (let i = 0; i < 12; i++) {
+      const a = this.rand() * Math.PI * 2;
+      const r = 2.5 + this.rand() * (this.cfg.patrolRadius - 2.5);
+      const wp = _v.set(this.home.x + Math.cos(a) * r, 0, this.home.z + Math.sin(a) * r);
+      if (!inArea(wp.x, wp.z, 0.8)) continue;
+      if (!this.pathClear(this.root.position, wp, colliders)) continue;
+      this.waypoint.copy(wp);
+      this.state = 'walk';
+      this.stateT = 0;
+      return;
+    }
+    this.lookT = 1;
+  }
+
+  private blocked(p: THREE.Vector3, colliders: THREE.Box3[]) {
+    const r = this.cfg.radius;
+    if (!inArea(p.x, p.z, r)) return true;
+    for (const c of colliders) {
+      if (c.max.y < 0.05 || c.min.y > this.cfg.height) continue;
+      if (p.x > c.min.x - r && p.x < c.max.x + r && p.z > c.min.z - r && p.z < c.max.z + r) return true;
+    }
+    return false;
+  }
+
+  private pathClear(a: THREE.Vector3, b: THREE.Vector3, colliders: THREE.Box3[]) {
+    const n = Math.ceil(a.distanceTo(b) / 0.4);
+    for (let i = 1; i <= n; i++) {
+      if (this.blocked(_v2.lerpVectors(a, b, i / n), colliders)) return false;
+    }
+    return true;
+  }
+
+  /** 눈에서 플레이어 머리까지: 시야각, 거리, 가림 */
+  canSee(playerHead: THREE.Vector3, hitMeshes: THREE.Object3D[]) {
+    const head = this.eyePosition(_v);
+    const to = _v2.subVectors(playerHead, head);
+    const dist = to.length();
+    if (dist > this.cfg.sightRange) return false;
+    const lookYaw = this.yaw + this.headYaw;
+    const fwd = _v3.set(-Math.sin(lookYaw), 0, -Math.cos(lookYaw));
+    const flat = Math.hypot(to.x, to.z) || 1e-6;
+    const cos = (to.x * fwd.x + to.z * fwd.z) / flat;
+    if (cos < Math.cos(this.cfg.fov / 2)) return false;
+    _ray.set(head, to.normalize());
+    _ray.far = dist;
+    const hit = _ray.intersectObjects(hitMeshes, false)[0];
+    return !hit || hit.distance > dist - 0.3;
+  }
+
+  /** 목표 방향에 원뿔 퍼짐을 넣는다 */
+  protected spreadDir(dir: THREE.Vector3, spread: number) {
+    const r = Math.sqrt(this.rand()) * spread;
+    const a = this.rand() * Math.PI * 2;
+    const side = _v.crossVectors(dir, UP).normalize();
+    const up = _v2.crossVectors(side, dir).normalize();
+    return dir.addScaledVector(side, Math.cos(a) * Math.tan(r)).addScaledVector(up, Math.sin(a) * Math.tan(r)).normalize();
+  }
+}
+
+/**
+ * 첫 번째 적: 사람형 로봇. 오른팔로 총을 겨눠 점사한다.
+ * 모델(enemy_robot.glb)은 로컬 +X를 정면으로 본다. 그래서 model.rotation.y = PI/2로 -Z가 정면이 되게 놓는다.
+ * 오른팔(ArmR~HandR)은 코드가 직접 조준하고, 나머지는 클립(Walk/Idle/Death)이 움직인다.
+ */
+export class GunnerEnemy extends Enemy {
+  readonly kind = 'gunner';
+  model: THREE.Object3D;
+  mixer: THREE.AnimationMixer;
+  actions: Record<string, THREE.AnimationAction> = {};
+  gun: THREE.Object3D;
+  muzzle: THREE.Object3D;
+  flash: MuzzleFlash;
+  lifeBar: LifeBar;
 
   private bones: Record<string, THREE.Bone> = {};
   private phase = 0;
   private idleT = Math.random() * 2;
-  private stateT = 0;
-  private lookT = 0;
-  /** 머리가 몸 정면 기준으로 돌아간 각(목+머리), 목표, 각속도 */
-  private headYaw = 0;
-  private headTarget = 0;
-  private headVel = 0;
-  /** 상체 비틀림(골반 기준), 목표 */
-  private twist = 0;
-  private twistTarget = 0;
-  /** 다음 시선 목표로 넘어가기까지 남은 시간 */
-  private glanceT = 0;
-  private glanceSide = 1;
-  /** 이번 프레임 몸 회전 속도(rad/s): 제자리 돌 때 발을 떼게 한다 */
-  private turnRate = 0;
   /** 걷기 클립 비중(부드럽게 오르내림) */
   private stepW = 0;
-  /** 전투 중 몸을 다시 정렬하는 중인지 */
-  private realign = false;
   /**
    * 절차적 회전(두리번, 조준)을 넣기 전의 클립 자세.
    * AnimationMixer는 트랙 값이 지난 프레임과 같으면 뼈에 다시 쓰지 않으므로(걷기 클립의 몸통처럼 고정된 트랙),
    * 매 프레임 이 자세로 되돌려 놓지 않으면 절차적 회전이 계속 쌓여 몸이 빙글빙글 돈다.
    */
   private restQ: [THREE.Bone, THREE.Quaternion][] = [];
-  private sightT = Math.random() * ENEMY.sightInterval;
-  private searchT = 0;
   private burstLeft = 0;
-  private fireT = 0;
   private recoil = 0;
-  private flinch = 0;
-  private hitFlash = 0;
-  private greyU = { uGrey: { value: 0 } };
   private eyeMats: THREE.MeshStandardMaterial[] = [];
-  private rand: () => number;
 
   constructor(assets: Assets, rand: () => number, flashTex: THREE.Texture) {
-    this.rand = rand;
+    super(ENEMY, rand);
     this.model = SkeletonUtils.clone(assets.enemy.scene);
     this.model.rotation.y = Math.PI / 2;
     this.root.add(this.model);
@@ -252,270 +546,48 @@ export class Enemy {
     this.flash = new MuzzleFlash(this.muzzle, flashTex, 0.35);
   }
 
-  get alive() {
-    return this.state !== 'dead';
+  protected eyePosition(out: THREE.Vector3) {
+    return this.bones.Head.getWorldPosition(out);
   }
 
-  forward(out = new THREE.Vector3()) {
-    return out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+  protected idleAimHeight() {
+    return 1.2 * ENEMY.size;
   }
 
-  place(x: number, z: number, yaw: number) {
-    this.root.position.set(x, 0, z);
-    this.home.set(x, 0, z);
-    this.yaw = yaw;
-    this.state = 'look';
-    this.lookT = 1 + this.rand() * 2;
+  protected onEngage() {
+    this.burstLeft = 0;
   }
 
-  damage(fromPos: THREE.Vector3, hooks: EnemyHooks) {
-    if (!this.alive) return false;
-    this.hp--;
-    this.hitFlash = 0.12;
-    this.flinch = 1;
-    if (this.hp <= 0) {
-      this.die(hooks);
-      return true;
-    }
-    // 맞으면 쏜 쪽을 안다
-    if (this.state !== 'combat') {
-      this.state = 'combat';
-      this.lastSeen.copy(fromPos);
-      this.burstLeft = 0;
-      this.fireT = 0.4;
-    }
-    this.searchT = ENEMY.searchTime;
-    return false;
-  }
-
-  die(hooks?: EnemyHooks) {
-    this.state = 'dead';
-    this.hp = 0;
-    this.deathT = 0;
-    this.speed = 0;
-    for (const b of this.hitBoxes) b.removeFromParent();
-    hooks?.onDeath?.(this);
-  }
-
-  /** world: 레이캐스트 대상(정적), colliders: 이동 충돌 */
-  update(dt: number, player: Player, playerHead: THREE.Vector3, world: { hitMeshes: THREE.Object3D[]; colliders: THREE.Box3[] }, hooks: EnemyHooks) {
+  protected weaponTick(dt: number) {
     this.flash.update(dt);
-    this.hitFlash = Math.max(0, this.hitFlash - dt);
-    this.flinch = Math.max(0, this.flinch - dt * 5);
     this.recoil = Math.max(0, this.recoil - dt * 9);
-    if (this.alive && !this.frozen) this.think(dt, player, playerHead, world, hooks);
-    // 조준점: 전투 중이면 플레이어 가슴, 수색 중이면 마지막으로 본 곳
-    const aim = this.aimPoint;
-    if (this.state === 'search') aim.set(this.lastSeen.x, this.lastSeen.y + 1.3, this.lastSeen.z);
-    else if (this.state === 'combat') aim.set(player.pos.x, (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
-    else this.forward(aim).multiplyScalar(5).add(this.root.position).setY(this.root.position.y + 1.2 * ENEMY.size);
-    this.animate(dt, aim);
-    // 라이프 바: 맞은 직후 흰색으로 반짝인다
-    if (this.alive) this.lifeBar.draw(this.hp, ENEMY.health, this.hitFlash);
-    this.lifeBar.sprite.visible = this.alive;
   }
 
-  private think(dt: number, player: Player, playerHead: THREE.Vector3, world: { hitMeshes: THREE.Object3D[]; colliders: THREE.Box3[] }, hooks: EnemyHooks) {
-    const pos = this.root.position;
-    // 시야 검사(주기적으로)
-    this.sightT -= dt;
-    if (this.sightT <= 0) {
-      this.sightT = ENEMY.sightInterval;
-      this.seesPlayer = this.canSee(playerHead, world.hitMeshes);
-      if (this.seesPlayer) {
-        this.lastSeen.copy(player.pos);
-        if (this.state !== 'combat') {
-          this.state = 'combat';
-          this.burstLeft = 0;
-          this.fireT = 0.25;
-        }
-        this.searchT = ENEMY.searchTime;
-      }
-    }
-
-    if (this.state === 'combat' || this.state === 'search') {
-      this.speed = 0;
-      // 보이는 동안은 지금 위치, 안 보이면 마지막으로 본 곳
-      const tgt = this.seesPlayer ? player.pos : this.lastSeen;
-      const want = Math.atan2(-(tgt.x - pos.x), -(tgt.z - pos.z));
-      // 작은 움직임은 상체와 팔로만 따라가고, 많이 벗어나면 발을 떼서 몸을 정렬한다(정렬이 끝날 때까지)
-      const off = Math.abs(angDiff(want, this.yaw));
-      if (off > ENEMY.realignAngle) this.realign = true;
-      if (this.realign) {
-        const rate = off > ENEMY.twistMax * 0.8 ? ENEMY.combatTurnSpeed : ENEMY.combatTurnSpeed * 0.6;
-        this.turnBody(want, rate, dt);
-        if (Math.abs(angDiff(want, this.yaw)) < THREE.MathUtils.degToRad(3)) this.realign = false;
-      } else {
-        this.turnRate = 0;
-      }
-      const rest = angDiff(want, this.yaw);
-      this.twistTarget = THREE.MathUtils.clamp(rest, -ENEMY.twistMax, ENEMY.twistMax);
-      this.headTarget = THREE.MathUtils.clamp(rest, -ENEMY.headMax, ENEMY.headMax);
-      if (!this.seesPlayer) {
-        this.searchT -= dt;
-        this.state = 'search';
-        if (this.searchT <= 0) {
-          this.state = 'look';
-          this.lookT = THREE.MathUtils.lerp(ENEMY.lookTime[0], ENEMY.lookTime[1], this.rand());
-          this.stateT = 0;
-          this.glanceT = 0.6;
-        }
-      } else {
-        this.state = 'combat';
-      }
-      // 팔은 전투/수색 중 들고 있고, 사격은 보이고 조준됐을 때만
-      this.raise = Math.min(1, this.raise + dt / ENEMY.raiseTime);
-      this.fireT -= dt;
-      if (this.state === 'combat' && this.raise >= 1 && this.aimError < ENEMY.fireAngle && this.fireT <= 0) {
-        if (this.burstLeft <= 0) this.burstLeft = ENEMY.burst;
-        this.shoot(playerHead, player, hooks);
-        this.burstLeft--;
-        this.fireT = this.burstLeft > 0 ? ENEMY.burstInterval : THREE.MathUtils.lerp(ENEMY.burstPause[0], ENEMY.burstPause[1], this.rand());
-      }
-      return;
-    }
-
-    this.raise = Math.max(0, this.raise - dt / 0.6);
-    this.stateT += dt;
-    if (this.state === 'look') {
-      // 서서 좌우로 두리번거린다
-      this.speed = Math.max(0, this.speed - dt * 3);
-      this.turnRate = 0;
-      this.twistTarget = 0;
-      this.scan(dt, ENEMY.headMax, 0.3);
-      this.lookT -= dt;
-      if (this.lookT <= 0) this.pickWaypoint(world.colliders);
-    } else if (this.state === 'walk') {
-      const to = _v.subVectors(this.waypoint, pos).setY(0);
-      const dist = to.length();
-      const want = Math.atan2(-to.x, -to.z);
-      this.turnBody(want, ENEMY.turnSpeed, dt);
-      this.twistTarget = 0;
-      const align = Math.max(0, Math.cos(angDiff(want, this.yaw)));
-      const target = ENEMY.patrolSpeed * THREE.MathUtils.smoothstep(align, 0.7, 1) * Math.min(1, dist / 0.6 + 0.3);
-      this.speed += (target - this.speed) * (1 - Math.exp(-6 * dt));
-      // 걸을 때는 가끔 옆을 힐끗 본다
-      this.scan(dt, THREE.MathUtils.degToRad(30), 0.55);
-      const step = this.forward(_v2).multiplyScalar(this.speed * dt);
-      const next = _v3.copy(pos).add(step);
-      if (this.blocked(next, world.colliders)) {
-        this.state = 'look';
-        this.lookT = 1.5 + this.rand() * 2;
-        this.stateT = 0;
-        this.glanceT = 0.5;
-      } else {
-        pos.copy(next);
-      }
-      if (dist < 0.35) {
-        this.state = 'look';
-        this.lookT = THREE.MathUtils.lerp(ENEMY.lookTime[0], ENEMY.lookTime[1], this.rand());
-        this.stateT = 0;
-        this.glanceT = 0.5;
-      }
-    }
-  }
-
-  /** 몸(다리) 방향을 돌리고, 회전 속도를 기록한다(제자리 발걸음용) */
-  private turnBody(want: number, rate: number, dt: number) {
-    const before = this.yaw;
-    this.yaw = turnToward(this.yaw, want, rate * dt);
-    this.turnRate = dt > 0 ? Math.abs(angDiff(this.yaw, before)) / dt : 0;
-  }
-
-  /**
-   * 사람처럼 둘러보기: 한쪽을 보고 잠깐 멈췄다가 반대쪽, 가끔 정면.
-   * max: 좌우 최대 각, centerChance: 다음 시선이 정면일 확률
-   */
-  private scan(dt: number, max: number, centerChance: number) {
-    // 머리가 목표에 거의 닿은 뒤부터 멈춤 시간을 센다
-    if (Math.abs(this.headTarget - this.headYaw) < 0.06) this.glanceT -= dt;
-    if (this.glanceT > 0) return;
-    this.glanceT = THREE.MathUtils.lerp(ENEMY.glanceHold[0], ENEMY.glanceHold[1], this.rand());
-    if (this.headTarget !== 0 && this.rand() < centerChance) {
-      this.headTarget = 0;
-    } else {
-      this.glanceSide = -this.glanceSide;
-      this.headTarget = this.glanceSide * max * THREE.MathUtils.lerp(0.6, 1, this.rand());
-    }
-  }
-
-  private pickWaypoint(colliders: THREE.Box3[]) {
-    for (let i = 0; i < 12; i++) {
-      const a = this.rand() * Math.PI * 2;
-      const r = 2.5 + this.rand() * (ENEMY.patrolRadius - 2.5);
-      const wp = _v.set(this.home.x + Math.cos(a) * r, 0, this.home.z + Math.sin(a) * r);
-      if (!inArea(wp.x, wp.z, 0.8)) continue;
-      if (!this.pathClear(this.root.position, wp, colliders)) continue;
-      this.waypoint.copy(wp);
-      this.state = 'walk';
-      this.stateT = 0;
-      return;
-    }
-    this.lookT = 1;
-  }
-
-  private blocked(p: THREE.Vector3, colliders: THREE.Box3[]) {
-    const r = ENEMY.radius;
-    if (!inArea(p.x, p.z, ENEMY.radius)) return true;
-    for (const c of colliders) {
-      if (c.max.y < 0.05 || c.min.y > ENEMY.height) continue;
-      if (p.x > c.min.x - r && p.x < c.max.x + r && p.z > c.min.z - r && p.z < c.max.z + r) return true;
-    }
-    return false;
-  }
-
-  private pathClear(a: THREE.Vector3, b: THREE.Vector3, colliders: THREE.Box3[]) {
-    const n = Math.ceil(a.distanceTo(b) / 0.4);
-    for (let i = 1; i <= n; i++) {
-      if (this.blocked(_v2.lerpVectors(a, b, i / n), colliders)) return false;
-    }
-    return true;
-  }
-
-  /** 머리에서 플레이어 머리까지: 시야각, 거리, 가림 */
-  canSee(playerHead: THREE.Vector3, hitMeshes: THREE.Object3D[]) {
-    const head = this.bones.Head.getWorldPosition(_v);
-    const to = _v2.subVectors(playerHead, head);
-    const dist = to.length();
-    if (dist > ENEMY.sightRange) return false;
-    const lookYaw = this.yaw + this.headYaw;
-    const fwd = _v3.set(-Math.sin(lookYaw), 0, -Math.cos(lookYaw));
-    const flat = Math.hypot(to.x, to.z) || 1e-6;
-    const cos = (to.x * fwd.x + to.z * fwd.z) / flat;
-    if (cos < Math.cos(ENEMY.fov / 2)) return false;
-    _ray.set(head, to.normalize());
-    _ray.far = dist;
-    const hit = _ray.intersectObjects(hitMeshes, false)[0];
-    return !hit || hit.distance > dist - 0.3;
+  protected attack(player: Player, playerHead: THREE.Vector3, hooks: EnemyHooks) {
+    if (this.burstLeft <= 0) this.burstLeft = ENEMY.burst;
+    this.shoot(playerHead, player, hooks);
+    this.burstLeft--;
+    return this.burstLeft > 0 ? ENEMY.burstInterval : THREE.MathUtils.lerp(ENEMY.burstPause[0], ENEMY.burstPause[1], this.rand());
   }
 
   private shoot(playerHead: THREE.Vector3, player: Player, hooks: EnemyHooks) {
     const from = this.muzzle.getWorldPosition(new THREE.Vector3());
     // 가슴과 머리 사이를 노린다
     const target = new THREE.Vector3(player.pos.x, (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
-    const dir = target.sub(from).normalize();
-    const r = Math.sqrt(this.rand()) * ENEMY.spread;
-    const a = this.rand() * Math.PI * 2;
-    const side = _v.crossVectors(dir, UP).normalize();
-    const up = _v2.crossVectors(side, dir).normalize();
-    dir.addScaledVector(side, Math.cos(a) * Math.tan(r)).addScaledVector(up, Math.sin(a) * Math.tan(r)).normalize();
+    const dir = this.spreadDir(target.sub(from).normalize(), ENEMY.spread);
     this.flash.fire();
     this.recoil = 1;
-    hooks.onFire(this, from, dir);
+    hooks.onFire(this, from, dir, 'bullet');
   }
 
   /** 클립 블렌딩 + 머리/척추 두리번 + 오른팔 조준 */
-  private animate(dt: number, aimAt: THREE.Vector3) {
+  protected animate(dt: number, aimAt: THREE.Vector3) {
     this.root.rotation.y = this.yaw;
     const a = this.actions;
     const dead = this.deathT >= 0;
     if (dead) this.deathT += dt;
     const deathW = dead ? Math.min(1, this.deathT / 0.15) : 0;
-    // 고개와 상체: 스프링으로 사람처럼 가속/감속(목표가 바뀌어도 순간이동하지 않는다)
-    const k = ENEMY.headSpring;
-    this.headVel += (k * k * (this.headTarget - this.headYaw) - 2 * k * this.headVel) * dt;
-    this.headYaw += this.headVel * dt;
-    this.twist += (this.twistTarget - this.twist) * (1 - Math.exp(-8 * dt));
+    this.springHead(dt);
     for (const [b, q] of this.restQ) b.quaternion.copy(q);
     // 제자리에서 돌 때도 발을 뗀다(1rad 도는 동안 약 0.5m 걷는 만큼)
     const stepSpeed = Math.max(this.speed, this.turnRate * 0.5);
@@ -616,50 +688,5 @@ export class Enemy {
       chain.forEach((b, i) => b.quaternion.slerpQuaternions(clipQ[i], b.quaternion.clone(), w));
       B.ArmR.updateMatrixWorld(true);
     }
-  }
-}
-
-/** 적 무리: 배치, 갱신, 피격 메시 목록 */
-export class Enemies {
-  list: Enemy[] = [];
-  /** 플레이어 사격용 피격 박스(살아 있는 적만) */
-  hitMeshes: THREE.Object3D[] = [];
-
-  constructor(private assets: Assets, private scene: THREE.Scene, private flashTex: THREE.Texture) {}
-
-  spawn(colliders: THREE.Box3[], playerPos: THREE.Vector3, area: THREE.Box3, seed = 7, count = ENEMY.count) {
-    for (const e of this.list) e.root.removeFromParent();
-    this.list = [];
-    AREA.copy(area);
-    const rand = mulberry32(seed);
-    // 바닥 높이의 빈 칸만(경사로, 2층 제외). 머리 위가 막힌 곳(지붕 밑)도 1.9m 키가 들어가면 된다.
-    const blocked = (x: number, z: number) =>
-      colliders.some((c) => c.max.y > 0.05 && c.min.y < ENEMY.height + 0.1 && x > c.min.x - 0.9 && x < c.max.x + 0.9 && z > c.min.z - 0.9 && z < c.max.z + 0.9);
-    const w = area.max.x - area.min.x, d = area.max.z - area.min.z;
-    let tries = 0;
-    while (this.list.length < count && tries++ < 4000) {
-      const x = area.min.x + 1 + rand() * (w - 2);
-      const z = area.min.z + 1 + rand() * (d - 2);
-      if (blocked(x, z)) continue;
-      if (Math.hypot(x - playerPos.x, z - playerPos.z) < ENEMY.spawnFromPlayer) continue;
-      if (this.list.some((e) => Math.hypot(e.root.position.x - x, e.root.position.z - z) < ENEMY.spawnApart)) continue;
-      const e = new Enemy(this.assets, mulberry32(seed * 977 + this.list.length * 131), this.flashTex);
-      e.place(x, z, rand() * Math.PI * 2);
-      this.scene.add(e.root);
-      this.list.push(e);
-    }
-    this.refreshHitMeshes();
-  }
-
-  refreshHitMeshes() {
-    this.hitMeshes = this.list.flatMap((e) => (e.alive ? e.hitBoxes : []));
-  }
-
-  update(dt: number, player: Player, playerHead: THREE.Vector3, world: { hitMeshes: THREE.Object3D[]; colliders: THREE.Box3[] }, hooks: EnemyHooks) {
-    for (const e of this.list) e.update(dt, player, playerHead, world, hooks);
-  }
-
-  get aliveCount() {
-    return this.list.filter((e) => e.alive).length;
   }
 }

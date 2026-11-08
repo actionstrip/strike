@@ -5,7 +5,8 @@ import { Sfx } from './audio';
 import { CameraRig, type View } from './camera';
 import { BODY_LAYER, Character } from './character';
 import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MOVE, WEAPON } from './config';
-import { Enemies, type Enemy, type EnemyHooks } from './enemy';
+import type { Enemy, EnemyHooks, EnemyWeapon } from './enemy';
+import { Enemies } from './enemies';
 import { Effects, MuzzleFlash } from './effects';
 import { Hud } from './hud';
 import { Input } from './input';
@@ -76,7 +77,7 @@ let playerHits = 0;
 /** 디버그: 적 총알이 플레이어를 맞히지 않게 한다 */
 let godMode = false;
 const enemyHooks: EnemyHooks = {
-  onFire(_e: Enemy, from: THREE.Vector3, dir: THREE.Vector3) {
+  onFire(_e: Enemy, from: THREE.Vector3, dir: THREE.Vector3, kind: EnemyWeapon) {
     _eray.set(from, dir);
     _eray.far = 120;
     const hit = _eray.intersectObjects(world.hitMeshes, false)[0];
@@ -88,8 +89,13 @@ const enemyHooks: EnemyHooks = {
     const pHit = _eray.ray.intersectBox(_pbox, _phit);
     const pDist = pHit ? from.distanceTo(pHit) : Infinity;
     const end = from.clone().addScaledVector(dir, Math.min(wallDist, pDist, 120));
-    effects.tracer(from, end);
-    sfx.enemyShot(from.distanceTo(player.pos));
+    if (kind === 'laser') {
+      effects.laser(from, end);
+      sfx.laser(from.distanceTo(player.pos));
+    } else {
+      effects.tracer(from, end);
+      sfx.enemyShot(from.distanceTo(player.pos));
+    }
     if (pDist < wallDist && !godMode) {
       playerHits++;
       hud.showDamage(from, player.pos, player.yaw);
@@ -99,6 +105,9 @@ const enemyHooks: EnemyHooks = {
       const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : dir.clone().negate();
       effects.impact(hit.point, n, hit.object.userData.target ? hit.object : undefined);
     }
+  },
+  onCharge(_e: Enemy, from: THREE.Vector3) {
+    sfx.laserCharge(from.distanceTo(player.pos));
   },
   onDeath() {
     sfx.enemyDown();
@@ -299,8 +308,8 @@ const debug = {
     return true;
   },
   enemies,
-  /** 적 다시 배치(시드) */
-  spawnEnemies(seed = 7, count?: number) { enemies.spawn(world.colliders, player.pos, world.bounds, seed, count); },
+  /** 적 다시 배치(시드, [총잡이 수, 레이저 로봇 수]) */
+  spawnEnemies(seed = 7, counts?: [number, number]) { enemies.spawn(world.colliders, player.pos, world.bounds, seed, counts); },
   /** 맵 정보: 경계, 스폰, 충돌 박스 수 */
   map() { return { mode: world.mode, bounds: [world.bounds.min.toArray(), world.bounds.max.toArray()], spawn: world.spawn.pos.toArray(), colliders: world.colliders.length, hitMeshes: world.hitMeshes.length }; },
   /** 스폰 지점으로 */
@@ -312,7 +321,7 @@ const debug = {
   /** i번 적을 (x, z)로 옮기고 방향(도) 지정 */
   placeEnemy(i: number, x: number, z: number, yawDeg: number) { enemies.list[i]?.place(x, z, THREE.MathUtils.degToRad(yawDeg)); },
   enemyInfo() {
-    return enemies.list.map((e, i) => ({ i, state: e.state, hp: e.hp, sees: e.seesPlayer, raise: +e.raise.toFixed(2), aimErrDeg: +THREE.MathUtils.radToDeg(e.aimError).toFixed(1), pos: e.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: +THREE.MathUtils.radToDeg(e.yaw).toFixed(0), speed: +e.speed.toFixed(2) }));
+    return enemies.list.map((e, i) => ({ i, kind: e.kind, state: e.state, hp: e.hp, sees: e.seesPlayer, raise: +e.raise.toFixed(2), aimErrDeg: +THREE.MathUtils.radToDeg(e.aimError).toFixed(1), pos: e.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: +THREE.MathUtils.radToDeg(e.yaw).toFixed(0), speed: +e.speed.toFixed(2) }));
   },
   playerHits() { return playerHits; },
   /** 월드 지점(x, y, z)을 중심으로 도는 궤도 카메라. angle은 월드 기준(0 = +Z 쪽에서 -Z를 봄) */

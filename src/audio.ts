@@ -63,6 +63,33 @@ export class Sfx {
     this.burst({ gain: 0.7 * k, decay: 0.12, freq: 2600 * (0.4 + 0.6 * k) });
     this.thump(170, 0.45 * k, 0.1);
   }
+  /** 레이저 충전: 낮은 음에서 높은 음으로 올라가는 윙 소리 */
+  laserCharge(dist: number) {
+    const k = Math.max(0.08, 1 / (1 + dist * 0.12));
+    this.sweep({ from: 300, to: 1400, dur: 0.55, gain: 0.12 * k, type: 'triangle' });
+  }
+  /** 레이저 발사: 높은 음이 빠르게 떨어지는 '퓨웅' */
+  laser(dist: number) {
+    const k = Math.max(0.08, 1 / (1 + dist * 0.12));
+    this.sweep({ from: 2200, to: 180, dur: 0.22, gain: 0.35 * k, type: 'sawtooth' });
+    this.burst({ gain: 0.25 * k, decay: 0.12, freq: 3500, type: 'bandpass', q: 2 });
+  }
+  private sweep(o: { from: number; to: number; dur: number; gain: number; type: OscillatorType }) {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = o.type;
+    osc.frequency.setValueAtTime(o.from, t);
+    osc.frequency.exponentialRampToValueAtTime(o.to, t + o.dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(o.gain, t + Math.min(0.03, o.dur * 0.3));
+    g.gain.exponentialRampToValueAtTime(0.001, t + o.dur);
+    osc.connect(g).connect(this.master);
+    osc.start(t);
+    osc.stop(t + o.dur + 0.02);
+  }
   /** 내가 맞았을 때 */
   hurt() {
     this.thump(90, 0.6, 0.15);

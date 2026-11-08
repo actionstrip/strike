@@ -128,8 +128,8 @@ export const HAND = {
 export const ENEMY = {
   /** 덩치 배율(원래 키 1.9m). 모델, 총, 피격 박스, 보폭, 충돌 크기에 함께 적용된다. */
   size: 0.5,
-  /** 맵(21×41m)에 맞춘 적 수 */
-  count: 5,
+  /** 맵(23×45m)에 나오는 수(두 번째 적 ENEMY2.count와 합쳐 5기) */
+  count: 3,
   health: 5,
   /** 걷기 클립(제자리 걸음)이 한 주기 동안 앞으로 가는 거리(m)와 주기(초). tools/blender/enemy.blend와 맞춘다. */
   walkStride: 1.51,
@@ -174,3 +174,38 @@ export const ENEMY = {
   /** 사망 후 회색으로 바뀌는 시간 */
   greyTime: 1.0,
 };
+
+/**
+ * 두 번째 적: 카메라 몸통에 두 다리가 달린 보행 로봇(enemy2_robot.glb).
+ * 순찰/경계/전투 AI는 ENEMY와 같고, 총 대신 가운데 렌즈에서 레이저를 쏜다(충전 -> 발사).
+ */
+export const ENEMY2 = {
+  ...ENEMY,
+  /** 맵에 함께 나오는 수(첫 번째 적과 합쳐서 배치) */
+  count: 2,
+  /** 덩치 배율(처음 크기 = 렌즈 높이 1.0m, 몸통 위 1.4m 기준). 0.7이면 렌즈 0.7m, 몸통 위 약 1.0m */
+  size: 0.7,
+  /** 모델 단위 -> m */
+  unit: 0.085 * 0.7,
+  /** 걷기 한 주기(32프레임) 동안 앞으로 가는 거리(m) = 모델 7.6단위 × unit */
+  walkStride: 7.6 * 0.085 * 0.7,
+  /** 작아진 다리에 맞춘 순찰 속도(처음 크기에서는 0.7) */
+  patrolSpeed: 0.55,
+  /** 몸통(카메라)이 다리 기준으로 좌우로 돌아가는 한계 */
+  headMax: THREE.MathUtils.degToRad(70),
+  twistMax: THREE.MathUtils.degToRad(50),
+  realignAngle: THREE.MathUtils.degToRad(40),
+  /** 렌즈 위아래 한계 */
+  pitchMax: THREE.MathUtils.degToRad(35),
+  /** 렌즈가 켜져 조준할 수 있게 되는 시간 */
+  raiseTime: 0.3,
+  fireAngle: THREE.MathUtils.degToRad(3),
+  /** 레이저: 충전 시간, 발사 뒤 쉬는 시간, 퍼짐 */
+  chargeTime: 0.55,
+  laserPause: [1.3, 2.1] as [number, number],
+  spread: THREE.MathUtils.degToRad(1.2),
+  radius: 0.42 * 0.7,
+  height: 1.5 * 0.7,
+};
+/** 두 적이 함께 쓰는 AI 설정 */
+export type EnemyConfig = typeof ENEMY;

@@ -74,6 +74,10 @@ export class MuzzleFlash {
 
 interface Tracer { line: THREE.Line; t: number }
 interface Spark { pts: THREE.Points; vel: Float32Array; t: number }
+interface Beam { group: THREE.Group; core: THREE.Mesh; outer: THREE.Mesh; dot: THREE.Sprite; t: number }
+
+const BEAM_TIME = 0.2;
+const _y = new THREE.Vector3(0, 1, 0);
 
 export class Effects {
   flashTex = flashTexture();
@@ -82,6 +86,10 @@ export class Effects {
   private decalIdx = 0;
   private tracers: Tracer[] = [];
   private sparks: Spark[] = [];
+  private beams: Beam[] = [];
+  private beamGeo = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
+  /** 레이저가 닿은 곳의 붉은 빛 */
+  laserLight: THREE.PointLight;
   light: THREE.PointLight;
   private lightT = 0;
 
@@ -98,6 +106,8 @@ export class Effects {
     }
     this.light = new THREE.PointLight(0xffb060, 0, 6, 2);
     scene.add(this.light);
+    this.laserLight = new THREE.PointLight(0xff3020, 0, 5, 2);
+    scene.add(this.laserLight);
   }
 
   muzzleLight(pos: THREE.Vector3) {
@@ -157,9 +167,53 @@ export class Effects {
     this.tracers.push({ line, t: 0.05 });
   }
 
+  /** 레이저 빔: 하얀 심과 붉은 겉빛, 끝점의 붉은 점. 짧게 남았다가 가늘어지며 사라진다. */
+  laser(from: THREE.Vector3, to: THREE.Vector3) {
+    const dir = to.clone().sub(from);
+    const len = dir.length();
+    if (len < 1e-3) return;
+    const group = new THREE.Group();
+    group.position.copy(from).addScaledVector(dir, 0.5);
+    group.quaternion.setFromUnitVectors(_y, dir.divideScalar(len));
+    const mk = (color: number, opacity: number) =>
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    const core = new THREE.Mesh(this.beamGeo, mk(0xffe6e0, 1));
+    core.scale.set(0.012, len, 0.012);
+    const outer = new THREE.Mesh(this.beamGeo, mk(0xff2a14, 0.55));
+    outer.scale.set(0.045, len, 0.045);
+    group.add(core, outer);
+    const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flashTex, color: 0xff4a2a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    dot.position.set(0, len / 2, 0);
+    dot.scale.setScalar(0.35);
+    group.add(dot);
+    this.scene.add(group);
+    this.beams.push({ group, core, outer, dot, t: BEAM_TIME });
+    this.laserLight.position.copy(to);
+  }
+
   update(dt: number) {
     this.lightT -= dt;
     this.light.intensity = this.lightT > 0 ? 18 : 0;
+    let laserGlow = 0;
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const b = this.beams[i];
+      b.t -= dt;
+      const k = Math.max(0, b.t / BEAM_TIME);
+      laserGlow = Math.max(laserGlow, k);
+      const w = 0.4 + 0.6 * k;
+      b.core.scale.x = b.core.scale.z = 0.012 * w;
+      b.outer.scale.x = b.outer.scale.z = 0.045 * w;
+      (b.core.material as THREE.MeshBasicMaterial).opacity = k;
+      (b.outer.material as THREE.MeshBasicMaterial).opacity = 0.55 * k;
+      (b.dot.material as THREE.SpriteMaterial).opacity = k;
+      if (b.t <= 0) {
+        b.group.removeFromParent();
+        for (const m of [b.core, b.outer]) (m.material as THREE.Material).dispose();
+        (b.dot.material as THREE.Material).dispose();
+        this.beams.splice(i, 1);
+      }
+    }
+    this.laserLight.intensity = 14 * laserGlow;
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const tr = this.tracers[i];
       tr.t -= dt;
