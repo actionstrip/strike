@@ -4,11 +4,17 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 
 const robotUrl = import.meta.env.BASE_URL + 'models/robot.glb';
 const gunUrl = import.meta.env.BASE_URL + 'models/g32.glb';
+const enemyUrl = import.meta.env.BASE_URL + 'models/enemy_robot.glb';
+const enemyGunUrl = import.meta.env.BASE_URL + 'models/enemy_gun.glb';
 
 export interface Assets {
   robot: GLTF;
   gun: GLTF;
   clips: Record<string, THREE.AnimationClip>;
+  enemy: GLTF;
+  enemyGun: GLTF;
+  /** Walk, Idle, Death */
+  enemyClips: Record<string, THREE.AnimationClip>;
 }
 
 /** 클립에서 팔, 어깨, 목, 머리 트랙을 뺀다. 팔은 IK가, 상체 pitch는 코드가 맡는다. */
@@ -17,7 +23,9 @@ const KEEP_TRACK = /(Hips|UpLeg|Leg|Foot|ToeBase|Spine\d?|Hand(Index|Middle|Ring
 export async function loadAssets(): Promise<Assets> {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  const [robot, gun] = await Promise.all([loader.loadAsync(robotUrl), loader.loadAsync(gunUrl)]);
+  const [robot, gun, enemy, enemyGun] = await Promise.all([
+    loader.loadAsync(robotUrl), loader.loadAsync(gunUrl), loader.loadAsync(enemyUrl), loader.loadAsync(enemyGunUrl),
+  ]);
   const clips: Record<string, THREE.AnimationClip> = {};
   for (const clip of robot.animations) {
     clip.tracks = clip.tracks.filter((t) => {
@@ -26,5 +34,7 @@ export async function loadAssets(): Promise<Assets> {
     });
     clips[clip.name] = clip;
   }
-  return { robot, gun, clips };
+  const enemyClips: Record<string, THREE.AnimationClip> = {};
+  for (const clip of enemy.animations) enemyClips[clip.name] = clip;
+  return { robot, gun, clips, enemy, enemyGun, enemyClips };
 }

@@ -57,6 +57,22 @@ export class Sfx {
     this.burst({ gain: 0.4, decay: 0.35, freq: 700 });
     this.thump(140, 0.7, 0.12);
   }
+  /** 적 총소리: 거리에 따라 작고 둔해진다 */
+  enemyShot(dist: number) {
+    const k = Math.max(0.08, 1 / (1 + dist * 0.12));
+    this.burst({ gain: 0.7 * k, decay: 0.12, freq: 2600 * (0.4 + 0.6 * k) });
+    this.thump(170, 0.45 * k, 0.1);
+  }
+  /** 내가 맞았을 때 */
+  hurt() {
+    this.thump(90, 0.6, 0.15);
+    this.burst({ gain: 0.25, decay: 0.08, freq: 900 });
+  }
+  /** 적이 쓰러질 때 */
+  enemyDown() {
+    this.thump(60, 0.7, 0.4);
+    this.burst({ gain: 0.3, decay: 0.3, freq: 600, delay: 0.25 });
+  }
   dry() { this.burst({ gain: 0.3, decay: 0.03, freq: 4000, type: 'bandpass', q: 3 }); }
   click(pitch = 1) { this.burst({ gain: 0.45, decay: 0.05, freq: 2500 * pitch, type: 'bandpass', q: 4 }); }
   magOut() { this.click(0.8); this.burst({ gain: 0.2, decay: 0.1, freq: 1200, type: 'bandpass', q: 2, delay: 0.04 }); }

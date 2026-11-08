@@ -42,3 +42,5 @@ async function run(src, dst, { maxTex = 1024 } = {}) {
 
 await run('scratch_build/g32_raw.glb', 'public/models/g32.glb');
 await run('scratch_build/robot_raw.glb', 'public/models/robot.glb');
+await run('scratch_build/enemy_robot_raw.glb', 'public/models/enemy_robot.glb');
+await run('scratch_build/enemy_gun_raw.glb', 'public/models/enemy_gun.glb', { maxTex: 512 });

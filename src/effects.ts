@@ -104,11 +104,16 @@ export class Effects {
     this.lightT = 0.05;
   }
 
-  impact(point: THREE.Vector3, normal: THREE.Vector3, parent?: THREE.Object3D) {
+  impact(point: THREE.Vector3, normal: THREE.Vector3, parent?: THREE.Object3D, decal = true) {
+    const p = point.clone().addScaledVector(normal, 0.003);
+    if (decal) this.placeDecal(p, normal, parent);
+    this.sparkBurst(p, normal);
+  }
+
+  private placeDecal(p: THREE.Vector3, normal: THREE.Vector3, parent?: THREE.Object3D) {
     const d = this.decals[this.decalIdx++ % this.decals.length];
     d.visible = true;
     d.removeFromParent();
-    const p = point.clone().addScaledVector(normal, 0.003);
     if (parent) {
       parent.add(d);
       d.position.copy(parent.worldToLocal(p.clone()));
@@ -121,7 +126,9 @@ export class Effects {
     }
     d.rotateZ(Math.random() * Math.PI);
     d.scale.setScalar(0.7 + Math.random() * 0.6);
+  }
 
+  private sparkBurst(p: THREE.Vector3, normal: THREE.Vector3) {
     // 불꽃 파편
     const n = 8;
     const pos = new Float32Array(n * 3);

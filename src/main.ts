@@ -4,7 +4,8 @@ import { loadAssets } from './assets';
 import { Sfx } from './audio';
 import { CameraRig, type View } from './camera';
 import { BODY_LAYER, Character } from './character';
-import { MOVE, WEAPON } from './config';
+import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MOVE, WEAPON } from './config';
+import { Enemies, type Enemy, type EnemyHooks } from './enemy';
 import { Effects, MuzzleFlash } from './effects';
 import { Hud } from './hud';
 import { Input } from './input';
@@ -60,6 +61,48 @@ viewmodel.scene.environmentIntensity = 0.5;
 const fpFlash = new MuzzleFlash(viewmodel.gun.muzzle, effects.flashTex, 0.16);
 const tpFlash = new MuzzleFlash(character.gun.muzzle, effects.flashTex, 0.3, BODY_LAYER);
 
+// 적
+const enemies = new Enemies(assets, world.scene, effects.flashTex);
+enemies.spawn(world.colliders, player.pos);
+const playerHead = new THREE.Vector3();
+const _pbox = new THREE.Box3();
+const _eray = new THREE.Raycaster();
+const _phit = new THREE.Vector3();
+let playerHits = 0;
+/** 디버그: 적 총알이 플레이어를 맞히지 않게 한다 */
+let godMode = false;
+const enemyHooks: EnemyHooks = {
+  onFire(_e: Enemy, from: THREE.Vector3, dir: THREE.Vector3) {
+    _eray.set(from, dir);
+    _eray.far = 120;
+    const hit = _eray.intersectObjects(world.hitMeshes, false)[0];
+    const wallDist = hit ? hit.distance : 120;
+    // 플레이어 몸(충돌 박스)에 맞았는지
+    const r = MOVE.radius;
+    _pbox.min.set(player.pos.x - r, player.pos.y, player.pos.z - r);
+    _pbox.max.set(player.pos.x + r, player.pos.y + player.height, player.pos.z + r);
+    const pHit = _eray.ray.intersectBox(_pbox, _phit);
+    const pDist = pHit ? from.distanceTo(pHit) : Infinity;
+    const end = from.clone().addScaledVector(dir, Math.min(wallDist, pDist, 120));
+    effects.tracer(from, end);
+    sfx.enemyShot(from.distanceTo(player.pos));
+    if (pDist < wallDist && !godMode) {
+      playerHits++;
+      hud.showDamage(from, player.pos, player.yaw);
+      sfx.hurt();
+      camRig.kick(-0.004, (Math.random() - 0.5) * 0.004);
+    } else if (hit) {
+      const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : dir.clone().negate();
+      effects.impact(hit.point, n, hit.object.userData.target ? hit.object : undefined);
+    }
+  },
+  onDeath() {
+    sfx.enemyDown();
+    enemies.refreshHitMeshes();
+    hud.showKill();
+  },
+};
+
 let started = false;
 startEl.addEventListener('click', () => {
   sfx.unlock();
@@ -106,7 +149,7 @@ function shoot() {
   ray.set(cam.position, dir);
   ray.near = minDist;
   ray.far = WEAPON.range;
-  const hit = ray.intersectObjects(world.hitMeshes, false)[0];
+  const hit = ray.intersectObjects(world.hitMeshes.concat(enemies.hitMeshes), false)[0];
   const end = hit ? hit.point.clone() : cam.position.clone().addScaledVector(dir, WEAPON.range);
 
   // 총구 월드 위치
@@ -120,7 +163,13 @@ function shoot() {
   if (hit) {
     const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : dir.clone().negate();
     const isTarget = !!hit.object.userData.target;
-    effects.impact(hit.point, n, isTarget ? hit.object : undefined);
+    const enemy = hit.object.userData.enemy as Enemy | undefined;
+    effects.impact(hit.point, n, isTarget ? hit.object : undefined, !enemy);
+    if (enemy) {
+      enemy.damage(player.pos, enemyHooks);
+      hud.showHit();
+      sfx.hit();
+    }
     if (isTarget) {
       world.hitTarget(hit.object);
       hud.showHit();
@@ -158,12 +207,14 @@ function step(dt: number, rawDt: number) {
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(player.pitch, player.yaw, 0, 'YXZ'));
       aimTarget.set(0, 0, -50).applyQuaternion(q).add(tmp.set(player.pos.x, player.pos.y + 1.5, player.pos.z));
     } else {
-      camRig.aimPoint(world.hitMeshes, aimTarget, minDist);
+      camRig.aimPoint(world.hitMeshes.concat(enemies.hitMeshes), aimTarget, minDist);
     }
   } else {
     aimTarget.set(0, 0, -50).applyQuaternion(cam.quaternion).add(cam.position);
   }
   character.update(dt, player, weapon, aimTarget);
+  playerHead.set(player.pos.x, player.pos.y + THREE.MathUtils.lerp(EYE_HEIGHT, EYE_HEIGHT_CROUCH, player.crouchBlend) + 0.08, player.pos.z);
+  enemies.update(dt, player, playerHead, world, enemyHooks);
   viewmodel.update(player, weapon, cam, world.sun.position.clone().sub(world.sun.target.position).normalize(), {
     sky: world.hemi.color, ground: world.hemi.groundColor,
   });
@@ -189,11 +240,11 @@ function step(dt: number, rawDt: number) {
     renderer.render(viewmodel.scene, viewmodel.camera);
   }
 
-  hud.update(dt, weapon, weapon.spread(player), cam.fov, camRig.view, player.sprinting);
+  hud.update(dt, weapon, weapon.spread(player), cam.fov, camRig.view, player.sprinting, player.yaw);
   fpsAcc += rawDt; fpsFrames++;
   if (fpsAcc > 0.5) { fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
   hud.stats.textContent =
-    `${fpsShown.toFixed(0)} fps  draw ${renderer.info.render.calls}\n` +
+    `${fpsShown.toFixed(0)} fps  draw ${renderer.info.render.calls}  적 ${enemies.aliveCount}/${enemies.list.length}  피격 ${playerHits}\n` +
     `상태 ${weapon.mode(player)}${player.crouched && weapon.mode(player) !== 'crouch' ? '(앉기)' : ''}  속도 ${player.horizSpeed.toFixed(1)}m/s`;
   input.endFrame();
 }
@@ -243,6 +294,25 @@ const debug = {
     player.mantleHold = t;
     return true;
   },
+  enemies,
+  /** 적 다시 배치(시드) */
+  spawnEnemies(seed = 7, count?: number) { enemies.spawn(world.colliders, player.pos, seed, count); },
+  killEnemy(i: number) { const e = enemies.list[i]; if (e?.alive) e.die(enemyHooks); },
+  /** i번 적에게 플레이어가 맞힌 것처럼 피해를 준다 */
+  hitEnemy(i: number) { return enemies.list[i]?.damage(player.pos, enemyHooks); },
+  god(on: boolean) { godMode = on; },
+  /** i번 적을 (x, z)로 옮기고 방향(도) 지정 */
+  placeEnemy(i: number, x: number, z: number, yawDeg: number) { enemies.list[i]?.place(x, z, THREE.MathUtils.degToRad(yawDeg)); },
+  enemyInfo() {
+    return enemies.list.map((e, i) => ({ i, state: e.state, hp: e.hp, sees: e.seesPlayer, raise: +e.raise.toFixed(2), aimErrDeg: +THREE.MathUtils.radToDeg(e.aimError).toFixed(1), pos: e.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: +THREE.MathUtils.radToDeg(e.yaw).toFixed(0), speed: +e.speed.toFixed(2) }));
+  },
+  playerHits() { return playerHits; },
+  /** 월드 지점(x, y, z)을 중심으로 도는 궤도 카메라. angle은 월드 기준(0 = +Z 쪽에서 -Z를 봄) */
+  orbitPoint(x: number, y: number, z: number, angleDeg: number, dist = 3.5) {
+    camRig.orbit = { angle: angleDeg - THREE.MathUtils.radToDeg(player.yaw) + 180, dist, height: y, pivot: new THREE.Vector3(x, y, z) };
+  },
+  /** i번 적의 갱신(순찰/전투)을 멈추거나 푼다 */
+  freezeEnemy(i: number, on: boolean) { const e = enemies.list[i]; if (e) e.frozen = on; },
   /** 시뮬레이션을 1/60초씩 n번 진행(실시간과 무관한 결정적 테스트용) */
   tick(n = 1) { for (let i = 0; i < n; i++) step(1 / 60, 1 / 60); },
   /** 걸음 위상 고정(null 해제) */

@@ -123,3 +123,36 @@ export const HAND = {
   wristBack: 0.045,
   palmOut: 0.03,
 };
+
+/** 적 로봇 */
+export const ENEMY = {
+  count: 6,
+  health: 5,
+  /** 걷기 클립(제자리 걸음)이 한 주기 동안 앞으로 가는 거리(m)와 주기(초). tools/blender/enemy.blend와 맞춘다. */
+  walkStride: 1.51,
+  walkPeriod: 1.6,
+  patrolSpeed: 1.2,
+  patrolRadius: 8,
+  /** 서서 두리번거리는 시간 범위(초) */
+  lookTime: [2, 4] as [number, number],
+  turnSpeed: THREE.MathUtils.degToRad(120),
+  combatTurnSpeed: THREE.MathUtils.degToRad(150),
+  /** 시야: 전체 각도와 거리 */
+  fov: THREE.MathUtils.degToRad(110),
+  sightRange: 30,
+  sightInterval: 0.2,
+  /** 발견 후 팔을 다 드는 시간 */
+  raiseTime: 0.35,
+  /** 이 각도 안으로 조준되면 발사 */
+  fireAngle: THREE.MathUtils.degToRad(4),
+  burst: 3,
+  burstInterval: 0.2,
+  burstPause: [0.8, 1.3] as [number, number],
+  spread: THREE.MathUtils.degToRad(2),
+  /** 시야를 잃은 뒤 마지막 위치를 바라보는 시간 */
+  searchTime: 3,
+  radius: 0.4,
+  height: 1.9,
+  /** 사망 후 회색으로 바뀌는 시간 */
+  greyTime: 1.0,
+};

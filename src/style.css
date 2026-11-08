@@ -10,6 +10,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f12; fon
     linear-gradient(45deg, transparent 45%, #fff 45%, #fff 55%, transparent 55%),
     linear-gradient(-45deg, transparent 45%, #fff 45%, #fff 55%, transparent 55%);
   -webkit-mask: radial-gradient(circle, transparent 5px, #000 6px); mask: radial-gradient(circle, transparent 5px, #000 6px); }
+#hitmarker.kill { transform: scale(1.4); background:
+    linear-gradient(45deg, transparent 45%, #ff3b30 45%, #ff3b30 55%, transparent 55%),
+    linear-gradient(-45deg, transparent 45%, #ff3b30 45%, #ff3b30 55%, transparent 55%); }
+#damage { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(200,0,0,.55) 100%); }
+#dmg-dir { position: absolute; left: 50%; top: 50%; width: 220px; height: 220px; opacity: 0; transform: translate(-50%, -50%); }
+#dmg-dir i { position: absolute; left: 50%; top: 0; width: 60px; height: 16px; margin-left: -30px;
+  border-top: 5px solid rgba(255,40,30,.9); border-radius: 50% 50% 0 0 / 100% 100% 0 0; }
 #ammo { position: absolute; right: 32px; bottom: 26px; font-weight: 700; text-shadow: 0 1px 3px #000; }
 #ammo-mag { font-size: 44px; }
 #ammo-res { font-size: 20px; opacity: .75; margin-left: 6px; }
