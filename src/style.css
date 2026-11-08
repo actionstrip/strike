@@ -64,3 +64,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f12; fon
   #intro .maps { flex-direction: column; align-items: stretch; }
   .map-card, .map-card.small { width: 100%; }
 }
+
+/* 탄창 아이템을 주웠을 때 탄약 표시 위에 잠깐 */
+#pickup-toast { position: fixed; right: 24px; bottom: 74px; color: #ffc34d; font-weight: 700; font-size: 18px; text-shadow: 0 1px 4px rgba(0,0,0,.8); opacity: 0; transform: translateY(6px); transition: opacity .15s, transform .15s; pointer-events: none; }
+#pickup-toast.show { opacity: 1; transform: none; }

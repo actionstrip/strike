@@ -95,6 +95,12 @@ export class Sfx {
     this.thump(90, 0.6, 0.15);
     this.burst({ gain: 0.25, decay: 0.08, freq: 900 });
   }
+  /** 탄창 아이템을 주웠을 때: 철컥 + 짧은 높은 음 */
+  pickup() {
+    this.click(1.2);
+    this.thump(260, 0.3, 0.06);
+    this.sweep({ from: 900, to: 1500, dur: 0.12, gain: 0.12, type: 'triangle' });
+  }
   /** 적이 쓰러질 때 */
   enemyDown() {
     this.thump(60, 0.7, 0.4);

@@ -129,7 +129,7 @@ export class World {
     // 플레이어: 맵에 정한 자리, 없으면 +Z 끝에서 -Z를 본다
     const sp = this.def.spawn ?? { x: cx, z: z1 - 6, yaw: 0 };
     this.spawn.pos.copy(this.findFree(new THREE.Vector3(sp.x, 0, sp.z)));
-    this.spawn.yaw = sp.yaw;
+    this.spawn.yaw = THREE.MathUtils.degToRad(sp.yaw);
     this.computeReach(this.spawn.pos);
   }
 

@@ -4,8 +4,8 @@ import { loadAssets } from './assets';
 import { Sfx } from './audio';
 import { CameraRig, type View } from './camera';
 import { BODY_LAYER, Character } from './character';
-import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MOVE, WEAPON } from './config';
-import type { Enemy, EnemyHooks, EnemyWeapon } from './enemy';
+import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MOVE, PICKUP, WEAPON } from './config';
+import { mulberry32, type Enemy, type EnemyHooks, type EnemyWeapon } from './enemy';
 import { Enemies } from './enemies';
 import { Effects, MuzzleFlash } from './effects';
 import { Hud } from './hud';
@@ -14,6 +14,7 @@ import { Player } from './player';
 import { Viewmodel } from './viewmodel';
 import { Weapon } from './weapon';
 import { World } from './world';
+import { Pickups } from './pickups';
 import { backToIntro, chooseMap } from './intro';
 
 const app = document.getElementById('app')!;
@@ -77,6 +78,11 @@ const tpFlash = new MuzzleFlash(character.gun.muzzle, effects.flashTex, 0.3, BOD
 // 적
 const enemies = new Enemies(assets, world.scene, effects.flashTex);
 enemies.spawn(world.colliders, player.pos, world.bounds, 7, mapDef.enemies, (x, z) => world.reachable(x, z));
+// 탄창 아이템
+const pickups = new Pickups(assets, world.scene);
+const spawnPickups = (seed = 11) =>
+  pickups.spawn(mapDef.pickups, { colliders: world.colliders, area: world.bounds, reachable: (x, z) => world.reachable(x, z), rand: mulberry32(seed), from: world.spawn.pos });
+spawnPickups();
 const playerHead = new THREE.Vector3();
 const _pbox = new THREE.Box3();
 const _eray = new THREE.Raycaster();
@@ -236,6 +242,11 @@ function step(dt: number, rawDt: number) {
   character.update(dt, player, weapon, aimTarget);
   playerHead.set(player.pos.x, player.pos.y + THREE.MathUtils.lerp(EYE_HEIGHT, EYE_HEIGHT_CROUCH, player.crouchBlend) + 0.08, player.pos.z);
   enemies.update(dt, player, playerHead, world, enemyHooks);
+  pickups.update(dt, player.pos, () => {
+    weapon.reserve += PICKUP.ammo;
+    sfx.pickup();
+    hud.showPickup(`+${PICKUP.ammo} 탄약`);
+  });
   viewmodel.update(player, weapon, cam, world.sun.position.clone().sub(world.sun.target.position).normalize(), {
     sky: world.hemi.color, ground: world.hemi.groundColor,
   });
@@ -322,6 +333,9 @@ const debug = {
   map() { return { mode: world.def.id, bounds: [world.bounds.min.toArray(), world.bounds.max.toArray()], spawn: world.spawn.pos.toArray(), colliders: world.colliders.length, hitMeshes: world.hitMeshes.length }; },
   /** 스폰 지점으로 */
   teleportSpawn() { player.pos.copy(world.spawn.pos); player.vel.set(0, 0, 0); player.yaw = world.spawn.yaw; },
+  /** 탄창 아이템: 위치와 주웠는지, 다시 뿌리기 */
+  pickups() { return pickups.items.map((it) => ({ pos: it.root.position.toArray().map((v) => +v.toFixed(2)), taken: it.taken })); },
+  respawnPickups(seed = 11) { spawnPickups(seed); },
   killEnemy(i: number) { const e = enemies.list[i]; if (e?.alive) e.die(enemyHooks); },
   /** i번 적에게 플레이어가 맞힌 것처럼 피해를 준다 */
   hitEnemy(i: number) { return enemies.list[i]?.damage(player.pos, enemyHooks); },

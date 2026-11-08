@@ -24,6 +24,16 @@ export class Hud {
     this.hitT = 0.15;
   }
 
+  private toast = document.getElementById('pickup-toast')!;
+  private toastTimer = 0;
+  /** 아이템을 주웠을 때 탄약 표시 위에 잠깐 */
+  showPickup(text: string) {
+    this.toast.textContent = text;
+    this.toast.classList.add('show');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => this.toast.classList.remove('show'), 1400);
+  }
+
   showKill() {
     this.killT = 0.35;
   }

@@ -209,11 +209,29 @@ export const ENEMY2 = {
 /** 두 적이 함께 쓰는 AI 설정 */
 export type EnemyConfig = typeof ENEMY;
 
+/** 탄창 아이템 */
+export const PICKUP = {
+  /** 주우면 늘어나는 예비 탄약 */
+  ammo: 30,
+  /** 줍는 거리(수평, m) */
+  radius: 0.8,
+  /** 바닥에서 떠 있는 높이(탄창 중심), 위아래 흔들림 */
+  height: 0.45,
+  bob: 0.07,
+  bobSpeed: 2.4,
+  spinSpeed: 1.8,
+  /** 탄창의 가장 긴 변(m). 실제 탄창(약 0.2m)보다 키워 멀리서도 보이게 */
+  size: 0.42,
+  emissive: 0x4a3510,
+  glowSize: 0.9,
+  glowColor: 0xffc34d,
+};
+
 /**
  * 맵 목록(인트로에서 고른다). glb와 충돌 json은 tools/blender/map_build.py → tools/optimize-models.mjs로 만든다.
  * - enemies: [총잡이, 레이저 로봇]
  * - fog: [시작, 끝] m
- * - spawn: 플레이어 시작점 근처(빈 자리를 찾는다)와 바라볼 방향(yaw, 0 = -Z). 없으면 +Z 끝에서 -Z를 본다.
+ * - spawn: 플레이어 시작점 근처(빈 자리를 찾는다)와 바라볼 방향(yaw, 0 = -Z) 단위는 도(180 = +Z). 없으면 +Z 끝에서 -Z를 본다.
  */
 export interface MapDef {
   id: string;
@@ -224,6 +242,8 @@ export interface MapDef {
   glb: string | null;
   colliders: string | null;
   enemies: [number, number];
+  /** 탄창 아이템 수 */
+  pickups: number;
   fog: [number, number];
   spawn?: { x: number; z: number; yaw: number };
   /** 싸우는 범위 [x0, z0, x1, z1](외곽 벽 안쪽). 없으면 충돌 박스 전체 범위. 적 배치와 순찰에 쓴다. */
@@ -238,18 +258,20 @@ export const MAPS: MapDef[] = [
   {
     id: 'arena', name: '컨테이너 기지', desc: '좁은 통로와 2층 발판이 얽힌 근접전 맵', size: '23 × 45m',
     thumb: 'images/map_arena.webp', glb: 'models/map.glb', colliders: 'models/map_colliders.json',
-    enemies: [6, 4], fog: [45, 110],
+    enemies: [6, 4], pickups: 5, fog: [45, 110],
   },
   {
     id: 'backrooms', name: '백룸', desc: '끝없이 이어지는 노란 사무실 방과 아치 통로', size: '75 × 20m',
     thumb: 'images/map_backrooms.webp', glb: 'models/map_backrooms.glb', colliders: 'models/map_backrooms_colliders.json',
-    enemies: [12, 8], fog: [10, 42], spawn: { x: 4, z: 5.2, yaw: 90 },
+    enemies: [12, 8], pickups: 10, fog: [10, 42],
+    // 복도 옆 작은 방(의자, 책장)에서 문(+Z, 복도) 쪽을 보고 시작: 복도에 바로 서면 시작하자마자 적 눈에 띈다
+    spawn: { x: 0, z: 0.6, yaw: 180 },
     indoor: { color: 0x8c8250, hemiSky: 0xfff0b8, hemiGround: 0x8a7440, hemi: 2.2 },
   },
   {
     id: 'test', name: '시험장', desc: '엄폐 상자와 표적판이 있는 연습 맵', size: '86 × 86m',
     thumb: '', glb: null, colliders: null,
-    enemies: [ENEMY.count, ENEMY2.count], fog: [60, 160],
+    enemies: [ENEMY.count, ENEMY2.count], pickups: 4, fog: [60, 160],
   },
 ];
 export const mapById = (id: string | null) => MAPS.find((m) => m.id === id);
