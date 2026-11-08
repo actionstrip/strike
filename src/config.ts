@@ -126,13 +126,17 @@ export const HAND = {
 
 /** 적 로봇 */
 export const ENEMY = {
-  count: 6,
+  /** 맵(21×41m)에 맞춘 적 수 */
+  count: 5,
   health: 5,
   /** 걷기 클립(제자리 걸음)이 한 주기 동안 앞으로 가는 거리(m)와 주기(초). tools/blender/enemy.blend와 맞춘다. */
   walkStride: 1.51,
   walkPeriod: 1.6,
   patrolSpeed: 1.2,
-  patrolRadius: 8,
+  patrolRadius: 6,
+  /** 배치: 플레이어와, 적끼리 최소 거리 */
+  spawnFromPlayer: 12,
+  spawnApart: 5,
   /** 서서 두리번거리는 시간 범위(초) */
   lookTime: [4.5, 7] as [number, number],
   /** 걷다가 방향을 바꿀 때 몸 회전 속도 */

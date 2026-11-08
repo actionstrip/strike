@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import type { MapColliders } from './world';
 
 const robotUrl = import.meta.env.BASE_URL + 'models/robot.glb';
 const gunUrl = import.meta.env.BASE_URL + 'models/g32.glb';
 const enemyUrl = import.meta.env.BASE_URL + 'models/enemy_robot.glb';
 const enemyGunUrl = import.meta.env.BASE_URL + 'models/enemy_gun.glb';
+const mapUrl = import.meta.env.BASE_URL + 'models/map.glb';
+const mapColUrl = import.meta.env.BASE_URL + 'models/map_colliders.json';
 
 export interface Assets {
   robot: GLTF;
@@ -15,16 +18,21 @@ export interface Assets {
   enemyGun: GLTF;
   /** Walk, Idle, Death */
   enemyClips: Record<string, THREE.AnimationClip>;
+  /** 실제 맵(시험 맵이면 null) */
+  map: GLTF | null;
+  mapColliders: MapColliders | null;
 }
 
 /** 클립에서 팔, 어깨, 목, 머리 트랙을 뺀다. 팔은 IK가, 상체 pitch는 코드가 맡는다. */
 const KEEP_TRACK = /(Hips|UpLeg|Leg|Foot|ToeBase|Spine\d?|Hand(Index|Middle|Ring|Pinky)\d)$/;
 
-export async function loadAssets(): Promise<Assets> {
+export async function loadAssets(withMap: boolean): Promise<Assets> {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  const [robot, gun, enemy, enemyGun] = await Promise.all([
+  const [robot, gun, enemy, enemyGun, map, mapColliders] = await Promise.all([
     loader.loadAsync(robotUrl), loader.loadAsync(gunUrl), loader.loadAsync(enemyUrl), loader.loadAsync(enemyGunUrl),
+    withMap ? loader.loadAsync(mapUrl) : Promise.resolve(null),
+    withMap ? fetch(mapColUrl).then((r) => r.json() as Promise<MapColliders>) : Promise.resolve(null),
   ]);
   const clips: Record<string, THREE.AnimationClip> = {};
   for (const clip of robot.animations) {
@@ -37,7 +45,7 @@ export async function loadAssets(): Promise<Assets> {
   const enemyClips: Record<string, THREE.AnimationClip> = {};
   for (const clip of enemy.animations) enemyClips[clip.name] = clip;
   fixEnemyWalkHips(enemyClips);
-  return { robot, gun, clips, enemy, enemyGun, enemyClips };
+  return { robot, gun, clips, enemy, enemyGun, enemyClips, map, mapColliders };
 }
 
 /**

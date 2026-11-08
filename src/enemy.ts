@@ -46,6 +46,11 @@ function turnToward(cur: number, target: number, maxStep: number) {
   return cur + THREE.MathUtils.clamp(d, -maxStep, maxStep);
 }
 
+/** 적이 다닐 수 있는 범위(맵 경계). Enemies.spawn이 맵에서 받아 설정한다. */
+const AREA = new THREE.Box3(new THREE.Vector3(-43, 0, -43), new THREE.Vector3(43, 5, 43));
+const inArea = (x: number, z: number, margin = 0) =>
+  x > AREA.min.x + margin && x < AREA.max.x - margin && z > AREA.min.z + margin && z < AREA.max.z - margin;
+
 /** 시드 고정 난수 */
 export function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -84,7 +89,7 @@ class LifeBar {
     this.canvas.height = 20;
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.SpriteMaterial({ map: this.tex, depthTest: false, depthWrite: false, transparent: true });
+    const mat = new THREE.SpriteMaterial({ map: this.tex, depthTest: true, depthWrite: false, transparent: true });
     this.sprite = new THREE.Sprite(mat);
     this.sprite.scale.set(0.75, 0.12, 1);
     this.sprite.position.y = y;
@@ -436,7 +441,7 @@ export class Enemy {
       const a = this.rand() * Math.PI * 2;
       const r = 2.5 + this.rand() * (ENEMY.patrolRadius - 2.5);
       const wp = _v.set(this.home.x + Math.cos(a) * r, 0, this.home.z + Math.sin(a) * r);
-      if (Math.abs(wp.x) > 40 || Math.abs(wp.z) > 40) continue;
+      if (!inArea(wp.x, wp.z, 0.8)) continue;
       if (!this.pathClear(this.root.position, wp, colliders)) continue;
       this.waypoint.copy(wp);
       this.state = 'walk';
@@ -448,9 +453,9 @@ export class Enemy {
 
   private blocked(p: THREE.Vector3, colliders: THREE.Box3[]) {
     const r = ENEMY.radius;
-    if (Math.abs(p.x) > 43 || Math.abs(p.z) > 43) return true;
+    if (!inArea(p.x, p.z, ENEMY.radius)) return true;
     for (const c of colliders) {
-      if (c.max.y < 0.3 || c.min.y > ENEMY.height) continue;
+      if (c.max.y < 0.05 || c.min.y > ENEMY.height) continue;
       if (p.x > c.min.x - r && p.x < c.max.x + r && p.z > c.min.z - r && p.z < c.max.z + r) return true;
     }
     return false;
@@ -619,19 +624,22 @@ export class Enemies {
 
   constructor(private assets: Assets, private scene: THREE.Scene, private flashTex: THREE.Texture) {}
 
-  spawn(colliders: THREE.Box3[], playerPos: THREE.Vector3, seed = 7, count = ENEMY.count) {
+  spawn(colliders: THREE.Box3[], playerPos: THREE.Vector3, area: THREE.Box3, seed = 7, count = ENEMY.count) {
     for (const e of this.list) e.root.removeFromParent();
     this.list = [];
+    AREA.copy(area);
     const rand = mulberry32(seed);
+    // 바닥 높이의 빈 칸만(경사로, 2층 제외). 머리 위가 막힌 곳(지붕 밑)도 1.9m 키가 들어가면 된다.
     const blocked = (x: number, z: number) =>
-      colliders.some((c) => c.max.y > 0.3 && x > c.min.x - 0.9 && x < c.max.x + 0.9 && z > c.min.z - 0.9 && z < c.max.z + 0.9);
+      colliders.some((c) => c.max.y > 0.05 && c.min.y < ENEMY.height + 0.1 && x > c.min.x - 0.9 && x < c.max.x + 0.9 && z > c.min.z - 0.9 && z < c.max.z + 0.9);
+    const w = area.max.x - area.min.x, d = area.max.z - area.min.z;
     let tries = 0;
-    while (this.list.length < count && tries++ < 2000) {
-      const x = (rand() * 2 - 1) * 36;
-      const z = (rand() * 2 - 1) * 36;
+    while (this.list.length < count && tries++ < 4000) {
+      const x = area.min.x + 1 + rand() * (w - 2);
+      const z = area.min.z + 1 + rand() * (d - 2);
       if (blocked(x, z)) continue;
-      if (Math.hypot(x - playerPos.x, z - playerPos.z) < 15) continue;
-      if (this.list.some((e) => Math.hypot(e.root.position.x - x, e.root.position.z - z) < 6)) continue;
+      if (Math.hypot(x - playerPos.x, z - playerPos.z) < ENEMY.spawnFromPlayer) continue;
+      if (this.list.some((e) => Math.hypot(e.root.position.x - x, e.root.position.z - z) < ENEMY.spawnApart)) continue;
       const e = new Enemy(this.assets, mulberry32(seed * 977 + this.list.length * 131), this.flashTex);
       e.place(x, z, rand() * Math.PI * 2);
       this.scene.add(e.root);
