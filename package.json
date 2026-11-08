@@ -1,0 +1,25 @@
+{
+  "name": "robot-fps",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "optimize-models": "node tools/optimize-models.mjs"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "4.2.1",
+    "@gltf-transform/extensions": "4.2.1",
+    "@gltf-transform/functions": "4.2.1",
+    "@types/three": "0.180.0",
+    "meshoptimizer": "0.25.0",
+    "sharp": "0.35.5",
+    "typescript": "5.9.3",
+    "vite": "8.3.4"
+  }
+}

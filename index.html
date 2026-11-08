@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Robot FPS Prototype</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app"></div>
+  <div id="hud">
+    <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i></div>
+    <div id="hitmarker"></div>
+    <div id="ammo"><span id="ammo-mag">30</span><span id="ammo-res">/ 90</span></div>
+    <div id="reload-hint">R 재장전</div>
+    <div id="view-label">1인칭 [V]</div>
+    <div id="stats"></div>
+  </div>
+  <div id="start">
+    <div class="panel">
+      <h1>ROBOT FPS 프로토타입</h1>
+      <p>클릭해서 시작</p>
+      <table>
+        <tr><td>WASD</td><td>이동</td></tr>
+        <tr><td>Shift</td><td>달리기</td></tr>
+        <tr><td>Space</td><td>점프</td></tr>
+        <tr><td>마우스 왼쪽</td><td>발사</td></tr>
+        <tr><td>마우스 오른쪽</td><td>조준</td></tr>
+        <tr><td>R</td><td>재장전</td></tr>
+        <tr><td>V</td><td>1인칭 / 3인칭 전환</td></tr>
+      </table>
+      <div id="loading">로딩 중...</div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
