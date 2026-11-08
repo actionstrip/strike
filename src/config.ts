@@ -290,6 +290,14 @@ export const MAPS: MapDef[] = [
     indoor: { color: 0x8c8250, hemiSky: 0xfff0b8, hemiGround: 0x8a7440, hemi: 2.2 },
   },
   {
+    id: 'desert', name: '사막 마을', desc: '사암 건물 사이 세 갈래 골목과 가운데 광장', size: '46 × 54m',
+    thumb: 'images/map_desert.webp', glb: 'models/map_desert.glb', colliders: 'models/map_desert_colliders.json',
+    enemies: [8, 6], pickups: 7, fog: [55, 130],
+    // 남쪽 끝 낮은 담 뒤에서 북쪽(-Z)을 보고 시작
+    spawn: { x: 0, z: 22, yaw: 0 },
+    area: [-22.6, -26.6, 22.6, 26.6],
+  },
+  {
     id: 'test', name: '시험장', desc: '엄폐 상자와 표적판이 있는 연습 맵', size: '86 × 86m',
     thumb: '', glb: null, colliders: null,
     enemies: [ENEMY.count, ENEMY2.count], pickups: 4, fog: [60, 160],
