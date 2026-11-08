@@ -209,3 +209,42 @@ export const ENEMY2 = {
 };
 /** 두 적이 함께 쓰는 AI 설정 */
 export type EnemyConfig = typeof ENEMY;
+
+/**
+ * 맵 목록(인트로에서 고른다). glb와 충돌 json은 tools/blender/map_build.py → tools/optimize-models.mjs로 만든다.
+ * - enemies: [총잡이, 레이저 로봇]
+ * - fog: [시작, 끝] m
+ * - spawn: 플레이어 시작점 근처(빈 자리를 찾는다)와 바라볼 방향(yaw, 0 = -Z). 없으면 +Z 끝에서 -Z를 본다.
+ */
+export interface MapDef {
+  id: string;
+  name: string;
+  desc: string;
+  size: string;
+  thumb: string;
+  glb: string | null;
+  colliders: string | null;
+  enemies: [number, number];
+  fog: [number, number];
+  spawn?: { x: number; z: number; yaw: number };
+  /** 싸우는 범위 [x0, z0, x1, z1](외곽 벽 안쪽). 없으면 충돌 박스 전체 범위. 적 배치와 순찰에 쓴다. */
+  area?: [number, number, number, number];
+}
+export const MAPS: MapDef[] = [
+  {
+    id: 'arena', name: '컨테이너 기지', desc: '좁은 통로와 2층 발판이 얽힌 근접전 맵', size: '23 × 45m',
+    thumb: 'images/map_arena.webp', glb: 'models/map.glb', colliders: 'models/map_colliders.json',
+    enemies: [3, 2], fog: [45, 110],
+  },
+  {
+    id: 'yard', name: '야적장', desc: '차, 컨테이너, 방벽이 흩어진 넓은 야외 맵', size: '54 × 110m',
+    thumb: 'images/map_yard.webp', glb: 'models/map_yard.glb', colliders: 'models/map_yard_colliders.json',
+    enemies: [6, 4], fog: [60, 170], area: [-27, -55.2, 27, 54.9],
+  },
+  {
+    id: 'test', name: '시험장', desc: '엄폐 상자와 표적판이 있는 연습 맵', size: '86 × 86m',
+    thumb: '', glb: null, colliders: null,
+    enemies: [ENEMY.count, ENEMY2.count], fog: [60, 160],
+  },
+];
+export const mapById = (id: string | null) => MAPS.find((m) => m.id === id);

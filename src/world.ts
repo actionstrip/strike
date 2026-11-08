@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { MapDef } from './config';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 
 // 맵 메시(수만 삼각형)에 대한 레이캐스트를 BVH로 가속한다: 사격, 카메라 충돌, 3인칭 조준점, 적 시야
@@ -8,11 +9,10 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 /**
- * 맵:
- * - arena(기본): public/models/map.glb + map_colliders.json(tools/blender/map_build.py가 만든 충돌 박스)
- * - test(?map=test): 바닥, 엄폐 박스, 표적판이 있는 시험 맵(오르기, 앉기 통로 확인용)
+ * 맵(config.ts의 MAPS):
+ * - glb가 있는 맵: 시각 메시 + 충돌 박스 json(tools/blender/map_build.py가 만든 것)
+ * - test: 바닥, 엄폐 박스, 표적판이 있는 시험 맵(오르기, 앉기 통로 확인용)
  */
-export type MapMode = 'arena' | 'test';
 
 export interface MapColliders {
   scale: number;
@@ -40,7 +40,7 @@ export class World {
   /** 플레이어 시작 위치와 방향(yaw, 0 = -Z) */
   spawn = { pos: new THREE.Vector3(0, 0, 0), yaw: 0 };
 
-  constructor(readonly mode: MapMode) {
+  constructor(readonly def: MapDef) {
     const s = this.scene;
     s.background = new THREE.Color(0x9fb8cf);
     s.fog = new THREE.Fog(0x9fb8cf, 60, 160);
@@ -59,14 +59,14 @@ export class World {
     sc.layers.enable(1);
     s.add(sun, sun.target);
     this.sun = sun;
-    if (mode === 'test') this.buildTest();
+    if (!def.glb) this.buildTest();
   }
 
   /** 실제 맵: 시각 메시는 그대로 그리고 레이캐스트 대상으로 쓰며, 이동 충돌은 미리 만든 박스를 쓴다 */
   buildArena(gltf: GLTF, col: MapColliders) {
     const s = this.scene;
     s.background = new THREE.Color(0xa9c3dc);
-    s.fog = new THREE.Fog(0xa9c3dc, 45, 110);
+    s.fog = new THREE.Fog(0xa9c3dc, this.def.fog[0], this.def.fog[1]);
     const map = gltf.scene;
     map.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -82,17 +82,28 @@ export class World {
     const [x0, , z0, x1, y1, z1] = col.bounds;
     // 바깥 벽 두께만큼 안쪽
     this.bounds.set(new THREE.Vector3(x0 + 0.5, 0, z0 + 0.5), new THREE.Vector3(x1 - 0.5, y1, z1 - 0.5));
+    const a = this.def.area;
+    if (a) this.bounds.set(new THREE.Vector3(a[0], 0, a[1]), new THREE.Vector3(a[2], y1, a[3]));
     // 그림자: 맵 전체를 덮는 만큼만(해상도를 높인다)
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     const half = Math.max(x1 - x0, z1 - z0) / 2 + 2;
-    this.sun.position.set(cx + 14, 30, cz + 9);
+    // 해를 맵 중심에서 같은 방향으로 맵 크기만큼 떨어뜨려, 넓은 맵도 깊이 범위 안에 들게 한다
+    const reach = half + 30;
+    this.sun.position.set(14, 30, 9).normalize().multiplyScalar(reach).add(new THREE.Vector3(cx, 0, cz));
     this.sun.target.position.set(cx, 0, cz);
     const sc = this.sun.shadow.camera;
-    sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.far = 80;
+    sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.far = reach * 2;
     sc.updateProjectionMatrix();
-    // 플레이어: +Z 끝 스폰 쪽에서 -Z를 본다
-    this.spawn.pos.copy(this.findFree(new THREE.Vector3(cx, 0, z1 - 6)));
-    this.spawn.yaw = 0;
+    // 넓은 맵은 그림자 해상도를 올린다(텍셀 약 3.5cm 이하 유지)
+    if (half > 40) {
+      this.sun.shadow.mapSize.set(4096, 4096);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    // 플레이어: 맵에 정한 자리, 없으면 +Z 끝에서 -Z를 본다
+    const sp = this.def.spawn ?? { x: cx, z: z1 - 6, yaw: 0 };
+    this.spawn.pos.copy(this.findFree(new THREE.Vector3(sp.x, 0, sp.z)));
+    this.spawn.yaw = sp.yaw;
   }
 
   /** 바닥 높이에서 반경 r 원기둥(키 2m)이 들어갈 빈 자리를 near 가까이에서 찾는다 */

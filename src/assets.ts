@@ -2,14 +2,13 @@ import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import type { MapColliders } from './world';
+import type { MapDef } from './config';
 
 const robotUrl = import.meta.env.BASE_URL + 'models/robot.glb';
 const gunUrl = import.meta.env.BASE_URL + 'models/g32.glb';
 const enemyUrl = import.meta.env.BASE_URL + 'models/enemy_robot.glb';
 const enemyGunUrl = import.meta.env.BASE_URL + 'models/enemy_gun.glb';
 const enemy2Url = import.meta.env.BASE_URL + 'models/enemy2_robot.glb';
-const mapUrl = import.meta.env.BASE_URL + 'models/map.glb';
-const mapColUrl = import.meta.env.BASE_URL + 'models/map_colliders.json';
 
 export interface Assets {
   robot: GLTF;
@@ -31,13 +30,15 @@ export interface Assets {
 /** 클립에서 팔, 어깨, 목, 머리 트랙을 뺀다. 팔은 IK가, 상체 pitch는 코드가 맡는다. */
 const KEEP_TRACK = /(Hips|UpLeg|Leg|Foot|ToeBase|Spine\d?|Hand(Index|Middle|Ring|Pinky)\d)$/;
 
-export async function loadAssets(withMap: boolean): Promise<Assets> {
+/** 캐릭터와 적, 그리고 고른 맵만 받는다 */
+export async function loadAssets(mapDef: MapDef): Promise<Assets> {
+  const base = import.meta.env.BASE_URL;
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   const [robot, gun, enemy, enemyGun, enemy2, map, mapColliders] = await Promise.all([
     loader.loadAsync(robotUrl), loader.loadAsync(gunUrl), loader.loadAsync(enemyUrl), loader.loadAsync(enemyGunUrl), loader.loadAsync(enemy2Url),
-    withMap ? loader.loadAsync(mapUrl) : Promise.resolve(null),
-    withMap ? fetch(mapColUrl).then((r) => r.json() as Promise<MapColliders>) : Promise.resolve(null),
+    mapDef.glb ? loader.loadAsync(base + mapDef.glb) : Promise.resolve(null),
+    mapDef.colliders ? fetch(base + mapDef.colliders).then((r) => r.json() as Promise<MapColliders>) : Promise.resolve(null),
   ]);
   const clips: Record<string, THREE.AnimationClip> = {};
   for (const clip of robot.animations) {

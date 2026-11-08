@@ -1,10 +1,10 @@
 """
-맵 빌드: 3d/map.glb -> scratch_build/map_raw.glb(시각용) + public/models/map_colliders.json(충돌 박스)
+맵 빌드: 원본 glb -> scratch_build/*_raw.glb(시각용) + public/models/*_colliders.json(충돌 박스)
 
 Blender에서 실행:  exec(open(r'C:/inetpub/wwwroot/test/shooting/tools/blender/map_build.py', encoding='utf-8').read())
-단계별로 쓸 수 있게 함수로 나눴다. build()가 전체를 돌린다.
+그다음 build(MAP_ARENA) 또는 build(MAP_YARD). 단계별로 쓸 수 있게 함수로 나눴다.
 
-- 가져온 뒤 모든 변환을 적용하고 SCALE배 키운다(캐릭터 1.8m 기준으로 문 1.93m, 상자 1.1~1.4m, 벽 5.5m).
+- 가져온 뒤 모든 변환을 적용하고 SCALE배 한다(맵마다 캐릭터 1.8m 기준으로 맞춘 값).
 - 작은데 삼각형이 많은 소품은 Decimate.
 - 충돌: 물체마다 BVH를 만들고 CELL 간격 (x,y) 기둥마다 아래에서 위로 레이를 쏴서 들어감(법선 아래)/나감(법선 위) 구간을 얻는다.
   같은 높이 구간을 가진 이웃 기둥을 직사각형으로 합쳐 박스를 만든다. 문, 창, 통로는 뚫린 채로 남고 경사로는 잘게 나뉜 계단이 된다.
@@ -14,21 +14,45 @@ import bpy
 import bmesh
 import json
 import math
+import re
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 ROOT = r'C:/inetpub/wwwroot/test/shooting'
-SRC = ROOT + '/3d/map.glb'
-OUT_GLB = ROOT + '/scratch_build/map_raw.glb'
-OUT_JSON = ROOT + '/public/models/map_colliders.json'
-SCALE = 2.75
-CELL = 0.125
-# 이 이상 삼각형을 가진 작은 소품은 줄인다.
-# 이 맵에서 대상은 판자를 엮은 상자 30개뿐인데, 면이 모두 실제 판자라 Decimate하면 가시처럼 깨진다(평면 병합으로도 줄지 않음).
-# 그래서 끈다(전체 58.7k 삼각형은 GT 640에서도 부담이 작다). 다른 맵에서 필요하면 낮춘다.
+
+# 맵별 설정
+MAP_ARENA = {
+    # ResoForge TDM 맵(컨테이너 기지): ×2.75면 문 1.93m, 상자 1.1~1.4m, 벽 5.5m
+    'src': '3d/map.glb', 'out_glb': 'scratch_build/map_raw.glb', 'out_json': 'public/models/map_colliders.json',
+    'scale': 2.75,
+    # 판자를 엮은 상자 30개만 해당되는데, 면이 모두 실제 판자라 Decimate하면 가시처럼 깨진다. 그래서 끈다(전체 58.7k).
+    'decimate_min_tris': 100000, 'decimate_target_tris': 220, 'decimate_max_size': 1.6, 'decimate_min_ratio': 0.08, 'decimate_skip': None,
+    'cell': 0.125, 'hq': 0.05, 'prop_max_size': 1.6, 'min_top': 0.0,
+}
+MAP_YARD = {
+    # ResoForge 저폴리 맵 에셋(야적장): ×0.55면 차 5m, 콘크리트 방벽 0.9m, 상자 1.0m, 큰 컨테이너 2.4m, 외곽 방벽 6m
+    'src': '3d/map3.glb', 'out_glb': 'scratch_build/map_yard_raw.glb', 'out_json': 'public/models/map_yard_colliders.json',
+    'scale': 0.55,
+    # 원기둥 748개(개당 127), 모래주머니/타이어 더미(최대 3.9k), 차(1.6k) 같은 소품이 삼각형 대부분(42.7만).
+    # 물체마다 따로 줄인다(합친 뒤 줄이면 상자 모서리가 무너진다). 최소 비율 0.25로 실루엣을 지킨다.
+    'decimate_min_tris': 100, 'decimate_target_tris': 40, 'decimate_max_size': 6.0, 'decimate_min_ratio': 0.25,
+    # 차는 곡면이 많아 많이 줄이면 틈이 생긴다: 고정 비율
+    'decimate_skip': None, 'decimate_fixed': [(r'^CAR', 0.55)],
+    # 넓고 곡면/비스듬한 물체가 많아 0.125m 격자면 박스가 수만 개가 된다. 격자와 높이 단위를 키우고,
+    # 3m 이하 물체(타이어 더미, 통, 상자, 방벽)는 외곽 박스 하나로, 0.25m보다 낮은 구간(팔레트 등)은 넘어가게 둔다.
+    'cell': 0.25, 'hq': 0.2, 'prop_max_size': 3.0, 'min_top': 0.25,
+}
+
+SRC = OUT_GLB = OUT_JSON = ''
+SCALE = 1.0
 DECIMATE_MIN_TRIS = 100000
 DECIMATE_TARGET_TRIS = 220
 DECIMATE_MAX_SIZE = 1.6
+DECIMATE_MIN_RATIO = 0.08
+DECIMATE_SKIP = None
+DECIMATE_FIXED = []
+CELL = 0.125
+MIN_TOP = 0.0
 # 충돌 높이 양자화(박스 수를 줄인다)
 HQ = 0.05
 # 이보다 작은 물체(상자, 통, 소품)는 외곽 박스 하나로, 큰 구조물(벽, 방, 바닥, 경사로)만 격자로 쪼갠다
@@ -54,7 +78,7 @@ def prop_boxes(meshes):
         if is_structure(o):
             continue
         x0, y0, z0, x1, y1, z1 = world_bb(o)
-        if max(x1 - x0, y1 - y0, z1 - z0) < PROP_MIN_SIZE or z1 - z0 < 0.02:
+        if max(x1 - x0, y1 - y0, z1 - z0) < PROP_MIN_SIZE or z1 - z0 < 0.02 or z1 < MIN_TOP:
             continue
         out.append((x0, y0, max(0.0, z0), x1, y1, z1))
     return out
@@ -78,6 +102,12 @@ def import_map():
     bpy.context.view_layer.update()
     # 부모 변환을 메시에 굽고 빈 노드는 지운다(연산자는 선택되지 않는 물체를 건너뛰므로 데이터로 직접)
     world = {o: o.matrix_world.copy() for o in meshes}
+    # 부모를 떼기 전에 원본 물체 이름(Object_123이 아닌 가장 가까운 조상, 예: CAR.002_8)을 기록한다
+    for o in meshes:
+        p = o
+        while p is not None and re.match(r'^(Object_\d+|Object_\d+\.\d+)$', p.name):
+            p = p.parent
+        o['src_name'] = p.name if p is not None else o.name
     for o in meshes:
         o.parent = None
         o.matrix_world = world[o]
@@ -113,8 +143,18 @@ def decimate_props(meshes):
         t = tri_count(o)
         if t < DECIMATE_MIN_TRIS or max(o.dimensions) > DECIMATE_MAX_SIZE:
             continue
+        name = o.get('src_name', '')
+        if DECIMATE_SKIP and re.match(DECIMATE_SKIP, name):
+            continue
+        ratio = max(DECIMATE_MIN_RATIO, DECIMATE_TARGET_TRIS / t)
+        for pat, r in DECIMATE_FIXED:
+            if re.match(pat, name):
+                ratio = r
+        if ratio >= 1:
+            continue
         m = o.modifiers.new('dec', 'DECIMATE')
-        m.ratio = max(0.08, DECIMATE_TARGET_TRIS / t)
+        m.ratio = ratio
+        m.use_collapse_triangulate = True
         with bpy.context.temp_override(object=o, active_object=o, selected_objects=[o]):
             bpy.ops.object.modifier_apply(modifier=m.name)
         n += 1
@@ -187,7 +227,7 @@ def column_intervals(meshes):
                             enter = hit.z
                     elif normal.z > 0.05:
                         start = enter if enter is not None else solid_bottom(bvh, x, y, floor_z, hit.z)
-                        if hit.z - start > 0.02:
+                        if hit.z - start > 0.02 and hit.z > MIN_TOP:
                             cols.setdefault((i, j), []).append((start, hit.z))
                         enter = None
                         floor_z = hit.z
@@ -242,7 +282,7 @@ def write_colliders(boxes, meshes):
     xs = [v for b in out for v in (b[0], b[3])]
     zs = [v for b in out for v in (b[2], b[5])]
     data = {
-        'source': '3d/map.glb', 'scale': SCALE, 'cell': CELL,
+        'source': SRC.replace(ROOT + '/', ''), 'scale': SCALE, 'cell': CELL,
         'bounds': [min(xs), 0, min(zs), max(xs), max(b[4] for b in out), max(zs)],
         'boxes': out,
     }
@@ -291,7 +331,26 @@ def export():
                               export_texcoords=False, export_animations=False)
 
 
-def build():
+def configure(cfg):
+    global SRC, OUT_GLB, OUT_JSON, SCALE, DECIMATE_MIN_TRIS, DECIMATE_TARGET_TRIS, DECIMATE_MAX_SIZE, DECIMATE_MIN_RATIO, DECIMATE_SKIP, DECIMATE_FIXED, CELL, HQ, PROP_MAX_SIZE, MIN_TOP
+    SRC = ROOT + '/' + cfg['src']
+    OUT_GLB = ROOT + '/' + cfg['out_glb']
+    OUT_JSON = ROOT + '/' + cfg['out_json']
+    SCALE = cfg['scale']
+    DECIMATE_MIN_TRIS = cfg['decimate_min_tris']
+    DECIMATE_TARGET_TRIS = cfg['decimate_target_tris']
+    DECIMATE_MAX_SIZE = cfg['decimate_max_size']
+    DECIMATE_MIN_RATIO = cfg['decimate_min_ratio']
+    DECIMATE_SKIP = cfg.get('decimate_skip')
+    DECIMATE_FIXED = cfg.get('decimate_fixed', [])
+    CELL = cfg['cell']
+    HQ = cfg['hq']
+    PROP_MAX_SIZE = cfg['prop_max_size']
+    MIN_TOP = cfg['min_top']
+
+
+def build(cfg=MAP_ARENA):
+    configure(cfg)
     meshes = import_map()
     info = decimate_props(meshes)
     cols, lo = column_intervals(meshes)

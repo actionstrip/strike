@@ -13,7 +13,8 @@ import { Input } from './input';
 import { Player } from './player';
 import { Viewmodel } from './viewmodel';
 import { Weapon } from './weapon';
-import { World, type MapMode } from './world';
+import { World } from './world';
+import { backToIntro, chooseMap } from './intro';
 
 const app = document.getElementById('app')!;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -29,8 +30,9 @@ app.appendChild(renderer.domElement);
 const input = new Input(renderer.domElement);
 const sfx = new Sfx();
 const hud = new Hud();
-const mapMode: MapMode = new URLSearchParams(location.search).get('map') === 'test' ? 'test' : 'arena';
-const world = new World(mapMode);
+// 인트로에서 맵을 고른다(?map=이 있으면 바로)
+const mapDef = await chooseMap();
+const world = new World(mapDef);
 const effects = new Effects(world.scene);
 const camRig = new CameraRig();
 const player = new Player(world.colliders);
@@ -53,8 +55,14 @@ const weapon = new Weapon({
 
 const startEl = document.getElementById('start')!;
 const loadingEl = document.getElementById('loading')!;
+startEl.classList.remove('hidden');
+document.getElementById('map-name')!.textContent = mapDef.name;
+document.getElementById('to-intro')!.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  backToIntro();
+});
 
-const assets = await loadAssets(mapMode === 'arena');
+const assets = await loadAssets(mapDef);
 if (assets.map && assets.mapColliders) world.buildArena(assets.map, assets.mapColliders);
 player.pos.copy(world.spawn.pos);
 player.yaw = world.spawn.yaw;
@@ -68,7 +76,7 @@ const tpFlash = new MuzzleFlash(character.gun.muzzle, effects.flashTex, 0.3, BOD
 
 // 적
 const enemies = new Enemies(assets, world.scene, effects.flashTex);
-enemies.spawn(world.colliders, player.pos, world.bounds);
+enemies.spawn(world.colliders, player.pos, world.bounds, 7, mapDef.enemies);
 const playerHead = new THREE.Vector3();
 const _pbox = new THREE.Box3();
 const _eray = new THREE.Raycaster();
@@ -309,9 +317,9 @@ const debug = {
   },
   enemies,
   /** 적 다시 배치(시드, [총잡이 수, 레이저 로봇 수]) */
-  spawnEnemies(seed = 7, counts?: [number, number]) { enemies.spawn(world.colliders, player.pos, world.bounds, seed, counts); },
+  spawnEnemies(seed = 7, counts: [number, number] = mapDef.enemies) { enemies.spawn(world.colliders, player.pos, world.bounds, seed, counts); },
   /** 맵 정보: 경계, 스폰, 충돌 박스 수 */
-  map() { return { mode: world.mode, bounds: [world.bounds.min.toArray(), world.bounds.max.toArray()], spawn: world.spawn.pos.toArray(), colliders: world.colliders.length, hitMeshes: world.hitMeshes.length }; },
+  map() { return { mode: world.def.id, bounds: [world.bounds.min.toArray(), world.bounds.max.toArray()], spawn: world.spawn.pos.toArray(), colliders: world.colliders.length, hitMeshes: world.hitMeshes.length }; },
   /** 스폰 지점으로 */
   teleportSpawn() { player.pos.copy(world.spawn.pos); player.vel.set(0, 0, 0); player.yaw = world.spawn.yaw; },
   killEnemy(i: number) { const e = enemies.list[i]; if (e?.alive) e.die(enemyHooks); },

@@ -18,9 +18,17 @@
     <div id="view-label">1인칭 [V]</div>
     <div id="stats"></div>
   </div>
-  <div id="start">
+  <div id="intro" class="hidden">
+    <header>
+      <h1>ROBOT FPS</h1>
+      <p>전장을 고르세요</p>
+    </header>
+    <div class="maps"></div>
+  </div>
+  <div id="start" class="hidden">
     <div class="panel">
       <h1>ROBOT FPS 프로토타입</h1>
+      <div id="map-name"></div>
       <p>클릭해서 시작</p>
       <table>
         <tr><td>WASD</td><td>이동</td></tr>
@@ -32,6 +40,7 @@
         <tr><td>V</td><td>1인칭 / 3인칭 전환</td></tr>
       </table>
       <div id="loading">로딩 중...</div>
+      <button type="button" id="to-intro">← 맵 선택으로</button>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
