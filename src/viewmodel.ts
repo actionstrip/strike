@@ -3,6 +3,7 @@ import type { Assets } from './assets';
 import { EYE_FROM_SHOULDER, FOV } from './config';
 import type { Player } from './player';
 import { attachHands, GunInstance, RobotRig } from './robot';
+import { ledgeGrabWorld } from './character';
 import type { Weapon } from './weapon';
 
 /**
@@ -65,7 +66,21 @@ export class Viewmodel {
     this.gun.root.position.copy(gp).add(mid);
     this.gun.root.quaternion.copy(gq);
     this.gun.applyParts(weapon);
-    attachHands(this.rig, this.gun, weapon, this.frameQ);
+    // 모서리 짚기: 월드 목표를 카메라 공간(=뷰모델 씬 좌표)으로
+    const lg = ledgeGrabWorld(player);
+    if (lg) {
+      worldCamera.updateMatrixWorld();
+      const inv = worldCamera.getWorldQuaternion(new THREE.Quaternion()).invert();
+      lg.pos.copy(worldCamera.worldToLocal(lg.pos));
+      // 뷰모델 FOV가 월드보다 좁으므로, 화면상 같은 자리에 보이도록 x, y를 줄인다
+      const wc = worldCamera as THREE.PerspectiveCamera;
+      const k = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) / Math.tan(THREE.MathUtils.degToRad(wc.fov / 2));
+      lg.pos.x *= k;
+      lg.pos.y *= k;
+      lg.fingers.applyQuaternion(inv);
+      lg.palm.applyQuaternion(inv);
+    }
+    attachHands(this.rig, this.gun, weapon, this.frameQ, lg);
   }
 
   setAspect(a: number) {

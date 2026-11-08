@@ -19,6 +19,8 @@ export class RobotRig {
   rightArm: THREE.Bone;
   /** 마지막 IK에서 손이 닿지 못한 거리(검증용) */
   reachError = { left: 0, right: 0 };
+  /** 마지막 왼손 목표(손바닥 중심, 검증용) */
+  lastLeftTarget = new THREE.Vector3();
 
   constructor(gltf: GLTF, clips: Record<string, THREE.AnimationClip>, opts: { armsOnly: boolean; layer?: number }) {
     this.model = SkeletonUtils.clone(gltf.scene);
@@ -168,8 +170,19 @@ function applyHand(chain: ArmChain, t: HandTarget, frameQ: THREE.Quaternion, pol
   return solveArm(chain, _w, _hq, _pole);
 }
 
+/** 왼손이 짚을 모서리(리그와 같은 좌표계). fingers는 앞, palm은 아래(손바닥이 짚는 면 쪽) */
+export interface LedgeGrab { pos: THREE.Vector3; fingers: THREE.Vector3; palm: THREE.Vector3; weight: number }
+
+/** 오르기 진행도 -> 왼손이 모서리를 짚는 가중치 */
+export function ledgeHandWeight(p: number) {
+  if (p < 0) return 0;
+  if (p < 0.15) return THREE.MathUtils.smoothstep(p, 0, 0.15);
+  if (p < 0.75) return 1;
+  return 1 - THREE.MathUtils.smoothstep(p, 0.75, 0.9);
+}
+
 /** 총 소켓에 양손을 붙인다. frameQ는 어깨 프레임 회전(팔꿈치 방향 기준). */
-export function attachHands(rig: RobotRig, gun: GunInstance, w: Weapon, frameQ: THREE.Quaternion) {
+export function attachHands(rig: RobotRig, gun: GunInstance, w: Weapon, frameQ: THREE.Quaternion, ledge?: LedgeGrab) {
   gun.root.updateMatrixWorld(true);
   const right = socketTarget(gun, new THREE.Vector3(0, 0, 0), HOLD.gripR);
   const gripL = socketTarget(gun, gun.gripL.position, HOLD.gripL);
@@ -183,6 +196,10 @@ export function attachHands(rig: RobotRig, gun: GunInstance, w: Weapon, frameQ: 
     const cp = gun.charger.position.clone().add(new THREE.Vector3(0.025, 0.01, 0));
     left = blendTarget(left, socketTarget(gun, cp, HOLD.charger), lw.charger);
   }
+  if (ledge && ledge.weight > 0) {
+    left = blendTarget(left, { pos: ledge.pos, fingers: ledge.fingers, palm: ledge.palm }, ledge.weight);
+  }
+  rig.lastLeftTarget.copy(left.pos);
   rig.reachError.right = applyHand(rig.right, right, frameQ, new THREE.Vector3(0.6, -1, 0.35));
   rig.reachError.left = applyHand(rig.left, left, frameQ, new THREE.Vector3(-0.6, -1, 0.35));
 }

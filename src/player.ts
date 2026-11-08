@@ -1,6 +1,28 @@
 import * as THREE from 'three';
-import { CLIP, LOOK, MOVE } from './config';
+import { CLIP, LOOK, MANTLE, MOVE } from './config';
 import type { Input } from './input';
+
+export interface Ledge {
+  /** 모서리 지점(벽면과 윗면이 만나는 곳, 월드) */
+  edge: THREE.Vector3;
+  /** 발 기준 높이 */
+  height: number;
+  /** 오른 뒤 설 위치 */
+  to: THREE.Vector3;
+}
+
+interface MantleState extends Ledge {
+  t: number;
+  dur: number;
+  from: THREE.Vector3;
+  /** 벽 바로 앞(상승이 끝나는 수평 위치) */
+  wall: THREE.Vector3;
+  fwd: THREE.Vector3;
+}
+
+const _ray = new THREE.Ray();
+const _hit = new THREE.Vector3();
+const _box = new THREE.Box3();
 
 /** 1인칭/3인칭 공용 플레이어 이동. 위치는 발바닥 기준. */
 export class Player {
@@ -20,6 +42,13 @@ export class Player {
   treadmill = false;
   /** 디버그: 걸음 위상 고정 */
   phaseHold: number | null = null;
+  /** 매달려 오르기 진행 상태 */
+  mantle: MantleState | null = null;
+  /** 디버그: 오르기 진행도 고정 */
+  mantleHold: number | null = null;
+  private mantleCooldown = 0;
+  /** 마지막으로 땅을 밟았던 높이(공중 오르기 한계 기준) */
+  private groundY = 0;
   private wasGrounded = true;
 
   constructor(private colliders: THREE.Box3[]) {}
@@ -43,7 +72,93 @@ export class Player {
     this.pitch = THREE.MathUtils.clamp(this.pitch, -LOOK.pitchLimit, LOOK.pitchLimit);
   }
 
+  /** 오르기 진행도 0..1, 오르는 중이 아니면 -1 */
+  get mantleProgress() {
+    return this.mantle ? Math.min(this.mantle.t / this.mantle.dur, 1) : -1;
+  }
+
+  forward(out = new THREE.Vector3()) {
+    return out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+  }
+
+  /** 정면에 오를 수 있는 모서리를 찾는다(가장 가까운 것). */
+  findLedge(): Ledge | null {
+    const fwd = this.forward();
+    const r = MOVE.radius;
+    let best: Ledge | null = null;
+    let bestDist = Infinity;
+    for (const c of this.colliders) {
+      const h = c.max.y - this.pos.y;
+      if (h < MANTLE.minHeight || h > MANTLE.maxHeight) continue;
+      _ray.set(new THREE.Vector3(this.pos.x, c.max.y - 0.05, this.pos.z), fwd);
+      if (!_ray.intersectBox(c, _hit)) continue;
+      const dist = Math.hypot(_hit.x - this.pos.x, _hit.z - this.pos.z);
+      if (dist < r * 0.5 || dist > r + MANTLE.reach || dist >= bestDist) continue;
+      const edge = new THREE.Vector3(_hit.x, c.max.y, _hit.z);
+      const to = edge.clone().addScaledVector(fwd, r + 0.3);
+      to.y = c.max.y;
+      // 오른 자리에 설 공간이 있어야 한다
+      _box.min.set(to.x - r, to.y + 0.02, to.z - r);
+      _box.max.set(to.x + r, to.y + MOVE.height, to.z + r);
+      if (this.colliders.some((o) => o.intersectsBox(_box))) continue;
+      // 오르는 동안 머리 위가 막혀 있으면 안 된다
+      _box.min.set(this.pos.x - r * 0.8, this.pos.y + MOVE.height, this.pos.z - r * 0.8);
+      _box.max.set(this.pos.x + r * 0.8, c.max.y + MOVE.height, this.pos.z + r * 0.8);
+      if (this.colliders.some((o) => o !== c && o.intersectsBox(_box))) continue;
+      bestDist = dist;
+      best = { edge, height: h, to };
+    }
+    return best;
+  }
+
+  startMantle(l: Ledge) {
+    const fwd = this.forward();
+    const wall = l.edge.clone().addScaledVector(fwd, -(MOVE.radius + 0.02));
+    this.mantle = {
+      ...l, t: 0, dur: MANTLE.baseTime + MANTLE.timePerMeter * l.height,
+      from: this.pos.clone(), wall, fwd,
+    };
+    this.vel.set(0, 0, 0);
+    this.sprinting = false;
+    this.grounded = false;
+  }
+
+  private updateMantle(dt: number) {
+    const m = this.mantle!;
+    m.t = this.mantleHold !== null ? this.mantleHold * m.dur : m.t + dt;
+    const p = Math.min(m.t / m.dur, 1);
+    const top = m.to.y + 0.03;
+    if (p < MANTLE.risePart) {
+      const u = p / MANTLE.risePart;
+      const e = u * u * (3 - 2 * u); // 손을 짚고 천천히 시작해서 밀어 올린다
+      this.pos.set(
+        THREE.MathUtils.lerp(m.from.x, m.wall.x, Math.min(u * 1.5, 1)),
+        THREE.MathUtils.lerp(m.from.y, top, e),
+        THREE.MathUtils.lerp(m.from.z, m.wall.z, Math.min(u * 1.5, 1)),
+      );
+    } else {
+      const u = (p - MANTLE.risePart) / (1 - MANTLE.risePart);
+      const e = u * u * (3 - 2 * u);
+      this.pos.set(THREE.MathUtils.lerp(m.wall.x, m.to.x, e), THREE.MathUtils.lerp(top, m.to.y, e), THREE.MathUtils.lerp(m.wall.z, m.to.z, e));
+    }
+    if (p >= 1 && this.mantleHold === null) {
+      this.pos.copy(m.to);
+      this.vel.copy(m.fwd).multiplyScalar(1.2);
+      this.mantle = null;
+      this.mantleCooldown = 0.25;
+      this.grounded = true;
+      this.wasGrounded = true;
+      this.groundY = this.pos.y;
+    }
+  }
+
   update(dt: number, input: Input, opts: { ads: boolean; wantsSprintBlocked: boolean }) {
+    if (this.mantleCooldown > 0) this.mantleCooldown -= dt;
+    if (this.mantle) {
+      this.updateMantle(dt);
+      this.landImpulse = Math.max(0, this.landImpulse - dt * 4);
+      return;
+    }
     const axis = input.moveAxis();
     const moving = axis.x !== 0 || axis.z !== 0;
     const canSprint = input.sprintHeld() && axis.z > 0.5 && this.grounded && !opts.ads && !opts.wantsSprintBlocked;
@@ -61,10 +176,24 @@ export class Player {
     this.vel.z += (wishZ - this.vel.z) * f;
 
     if (this.grounded && input.pressed.has('Space')) {
+      // 정면에 오를 모서리가 있으면 점프 대신 매달려 오른다
+      const ledge = this.mantleCooldown <= 0 && axis.z >= 0 ? this.findLedge() : null;
+      if (ledge && ledge.height > MANTLE.jumpOverHeight) {
+        this.startMantle(ledge);
+        return;
+      }
       this.vel.y = MOVE.jump;
       this.grounded = false;
+    } else if (!this.grounded && axis.z > 0.3 && this.mantleCooldown <= 0) {
+      // 공중에서 앞으로 밀면 닿는 모서리를 잡는다
+      const ledge = this.findLedge();
+      if (ledge && ledge.height <= MANTLE.airMaxHeight && ledge.edge.y - this.groundY <= MANTLE.maxHeight) {
+        this.startMantle(ledge);
+        return;
+      }
     }
     this.vel.y -= MOVE.gravity * dt;
+    const fallSpeed = -this.vel.y;
 
     if (!this.treadmill) {
       this.moveAxis('x', this.vel.x * dt);
@@ -77,8 +206,10 @@ export class Player {
       if (this.vel.y < 0) this.vel.y = 0;
       this.grounded = true;
     }
-    if (this.grounded && !this.wasGrounded) this.landImpulse = 1;
+    // 착지 충격은 낙하 속도에 비례(점프 착지 약 0.8, 높은 곳에서 떨어지면 최대 1.5)
+    if (this.grounded && !this.wasGrounded) this.landImpulse = THREE.MathUtils.clamp(fallSpeed / 7.5, 0.25, 1.5);
     this.wasGrounded = this.grounded;
+    if (this.grounded) this.groundY = this.pos.y;
     this.landImpulse = Math.max(0, this.landImpulse - dt * 4);
 
     // 걸음 위상: 클립 한 주기 동안 이동하는 거리를 기준으로 진행한다(발 미끄러짐 방지)
@@ -108,6 +239,8 @@ export class Player {
     );
     for (const c of this.colliders) {
       if (!box.intersectsBox(c)) continue;
+      // 윗면에 서 있는 박스(발이 윗면과 같은 높이)는 옆으로 밀어내지 않는다
+      if (axis !== 'y' && this.pos.y >= c.max.y - 1e-3) continue;
       // 발 높이 기준으로 낮은 턱(0.45m 이하)은 올라선다
       if (axis !== 'y' && c.max.y - this.pos.y <= 0.45 && this.grounded !== false) {
         const up = c.max.y - this.pos.y;

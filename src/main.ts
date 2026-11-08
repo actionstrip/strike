@@ -201,6 +201,7 @@ requestAnimationFrame(frame);
 
 /** 검증용 디버그 훅 */
 const debug = {
+  player, world, weapon,
   start() { started = true; startEl.classList.add('hidden'); sfx.unlock(); },
   setView(v: View) { setView(v); camRig.viewBlend = v === 'tp' ? 1 : 0; },
   /** x=오른쪽, z=앞 (-1..1). treadmill이면 제자리에서 애니메이션만 */
@@ -219,10 +220,26 @@ const debug = {
     weapon.reloadHold = t;
   },
   look(yawDeg: number, pitchDeg: number) { player.yaw = THREE.MathUtils.degToRad(yawDeg); player.pitch = THREE.MathUtils.degToRad(pitchDeg); },
-  orbit(angle: number | null, dist = 3.2, height = 1.1) { camRig.orbit = angle === null ? null : { angle, dist, height }; },
+  /** fixed면 지금 위치를 궤도 중심으로 고정(오르기처럼 몸이 움직이는 동작 확인용) */
+  orbit(angle: number | null, dist = 3.2, height = 1.1, fixed = false) {
+    camRig.orbit = angle === null ? null : { angle, dist, height, pivot: fixed ? new THREE.Vector3(player.pos.x, player.pos.y + height, player.pos.z) : undefined };
+  },
   timeScale(s: number) { timeScale = s; },
-  teleport(x: number, z: number) { player.pos.set(x, 0, z); player.vel.set(0, 0, 0); },
+  teleport(x: number, z: number, y = 0) { player.mantle = null; player.mantleHold = null; player.pos.set(x, y, z); player.vel.set(0, 0, 0); },
   jump() { input.pressed.add('Space'); },
+  /** 오르기 진행도 고정(0..1, null 해제). 오르는 중이 아니면 정면 모서리로 오르기를 시작한다 */
+  holdMantle(t: number | null) {
+    if (t === null) { player.mantleHold = null; return; }
+    if (!player.mantle) {
+      const l = player.findLedge();
+      if (!l) return false;
+      player.startMantle(l);
+    }
+    player.mantleHold = t;
+    return true;
+  },
+  /** 시뮬레이션을 1/60초씩 n번 진행(실시간과 무관한 결정적 테스트용) */
+  tick(n = 1) { for (let i = 0; i < n; i++) step(1 / 60, 1 / 60); },
   /** 걸음 위상 고정(null 해제) */
   phase(p: number | null) { player.phaseHold = p; },
   /** 지금 상태로 한 프레임 동기 렌더 후 캔버스 dataURL을 돌려준다(스크린샷 시트용) */
@@ -240,6 +257,8 @@ const debug = {
       ammo: weapon.ammo, reserve: weapon.reserve, speed: player.horizSpeed, grounded: player.grounded,
       gaitPhase: player.gaitPhase, weights: character.weights,
       reachTP: { ...character.rig.reachError }, reachFP: { ...viewmodel.rig.reachError },
+      mantle: player.mantleProgress, canMantle: player.findLedge()?.height ?? null,
+      ledgeTarget: character.rig.lastLeftTarget.toArray(), landImpulse: player.landImpulse, spread: weapon.spread(player),
       view: camRig.view, viewBlend: camRig.viewBlend, pos: player.pos.toArray(), MOVE,
     };
   },

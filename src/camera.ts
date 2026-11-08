@@ -11,10 +11,11 @@ export class CameraRig {
   view: View = 'fp';
   viewBlend = 0;
   /** 디버그 궤도 카메라: 캐릭터 정면 기준 각도(도). null이면 끔 */
-  orbit: { angle: number; dist: number; height: number } | null = null;
+  orbit: { angle: number; dist: number; height: number; pivot?: THREE.Vector3 } | null = null;
   private ray = new THREE.Raycaster();
   private shake = new THREE.Vector2();
   private shakeVel = new THREE.Vector2();
+  private lastLand = 0;
 
   constructor() {
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.03, 400);
@@ -35,12 +36,25 @@ export class CameraRig {
     this.shakeVel.addScaledVector(this.shake, -400 * dt).multiplyScalar(Math.max(0, 1 - 22 * dt));
     this.shake.addScaledVector(this.shakeVel, dt);
 
+    // 착지하면 화면이 아래로 눌렸다가 돌아온다
+    if (player.landImpulse > this.lastLand + 0.05) this.kick(-0.012 * player.landImpulse, 0);
+    this.lastLand = player.landImpulse;
+
+    // 매달려 오르기: 숙였다가 들어 올리며 살짝 기운다
+    const mp = player.mantleProgress;
+    let dip = 0, roll = 0;
+    if (mp >= 0) {
+      const k = Math.sin(Math.PI * mp);
+      dip = -0.07 * Math.sin(Math.PI * Math.min(mp / 0.6, 1)) + 0.03 * Math.max(0, Math.sin(Math.PI * (mp - 0.6) / 0.4));
+      roll = 0.05 * k;
+    }
+
     const cam = this.camera;
-    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(player.pitch + this.shake.x, player.yaw + this.shake.y, 0, 'YXZ'));
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(player.pitch + this.shake.x + dip, player.yaw + this.shake.y, roll, 'YXZ'));
     const fpPos = new THREE.Vector3(player.pos.x, player.pos.y + EYE_HEIGHT - player.landImpulse * 0.06, player.pos.z);
 
     if (this.orbit) {
-      const pivot = new THREE.Vector3(player.pos.x, player.pos.y + this.orbit.height, player.pos.z);
+      const pivot = this.orbit.pivot?.clone() ?? new THREE.Vector3(player.pos.x, player.pos.y + this.orbit.height, player.pos.z);
       const a = player.yaw + THREE.MathUtils.degToRad(this.orbit.angle);
       // angle 0 = 캐릭터 정면에서 바라봄
       cam.position.set(pivot.x - Math.sin(a) * this.orbit.dist, pivot.y, pivot.z - Math.cos(a) * this.orbit.dist);

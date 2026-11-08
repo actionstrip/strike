@@ -25,6 +25,23 @@ export const MOVE = {
   sprintOutDelay: 0.18,
 };
 
+/** 매달려 오르기 */
+export const MANTLE = {
+  /** 발 기준 오를 수 있는 모서리 높이 범위 */
+  minHeight: 0.45,
+  maxHeight: 2.0,
+  /** 땅에서 Space: 이 높이 이하는 그냥 점프로 넘는다 */
+  jumpOverHeight: 0.85,
+  /** 공중에서 잡을 수 있는 모서리 높이(현재 발 기준) */
+  airMaxHeight: 1.6,
+  /** 몸 반경 바깥으로 모서리를 찾는 거리 */
+  reach: 0.45,
+  baseTime: 0.4,
+  timePerMeter: 0.22,
+  /** 전체 시간 중 위로 올라가는 구간 비율 */
+  risePart: 0.6,
+};
+
 export const LOOK = {
   sensitivity: 0.0022,
   adsSensitivityScale: 0.6,
@@ -56,6 +73,8 @@ export const EYE_HEIGHT = 1.62;
 export const WEAPON_POSE = {
   hip: { pos: new THREE.Vector3(0.13, -0.06, -0.27), rot: new THREE.Euler(0.02, 0.05, 0.0) },
   sprint: { pos: new THREE.Vector3(0.06, -0.1, -0.22), rot: new THREE.Euler(-0.35, 0.85, 0.35) },
+  /** 오르는 동안: 총을 아래로 내리고 오른쪽으로 눕힌다 */
+  mantle: { pos: new THREE.Vector3(0.17, -0.13, -0.3), rot: new THREE.Euler(0.25, 0.5, -0.9) },
   /** ADS에서 조준점(AimPoint)이 눈 앞 이 거리에 온다 */
   adsEyeDistance: { fp: 0.22, tp: 0.13 },
   /** 시점별 비조준 자세 보정(뷰모델은 총을 화면 안으로 올리고, 3인칭은 가슴 높이로 내린다) */
@@ -75,11 +94,16 @@ export const WEAPON = {
   reloadTime: 2.3,
   range: 200,
   adsTime: 0.2,
+  /** 공중에서 ADS 전환이 느려지는 배율 */
+  adsTimeAirMul: 1.6,
+  /** 착지 직후 추가 퍼짐(라디안, landImpulse 1 기준) */
+  spreadLand: 0.03,
   spreadHip: 0.02,
   spreadAds: 0.002,
   spreadMove: 0.025,
-  recoilKick: 0.035,
-  recoilRise: 0.06,
+  /** 발사 1회 반동 임펄스: 뒤로(m/s), 총구 들림(rad/s) */
+  recoilKick: 0.45,
+  recoilRise: 0.55,
   camKick: 0.009,
 };
 

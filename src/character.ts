@@ -3,7 +3,7 @@ import type { Assets } from './assets';
 import { EYE_FROM_SHOULDER } from './config';
 import type { Player } from './player';
 import { rotateBoneWorld } from './rig';
-import { attachHands, GunInstance, RobotRig } from './robot';
+import { attachHands, GunInstance, ledgeHandWeight, RobotRig, type LedgeGrab } from './robot';
 import type { Weapon } from './weapon';
 
 /** 레이어 1: 3인칭 전신. 1인칭에서는 그림자만 드리운다. */
@@ -41,7 +41,8 @@ export class Character {
 
     // 하체 블렌딩
     const hs = player.horizSpeed;
-    const air = weapon.air;
+    // 오르는 동안은 다리를 접는 Air 자세
+    const air = Math.max(weapon.air, weapon.mantle);
     const moveW = THREE.MathUtils.smoothstep(hs, 0.15, 1.2) * (1 - air);
     const run = player.runBlend();
     player.localVel(_lv);
@@ -75,7 +76,10 @@ export class Character {
     _v.subVectors(aimTarget, eyeWorld).normalize();
     const pitch = Math.asin(THREE.MathUtils.clamp(_v.y, -1, 1));
     _right.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
-    for (const bone of rig.spine) rotateBoneWorld(bone, _right, pitch * 0.2);
+    // 오르기 상승 구간에서는 상체를 앞으로 숙인다
+    const mp = player.mantleProgress;
+    const lean = mp >= 0 ? -0.35 * Math.sin(Math.PI * Math.min(mp / 0.8, 1)) : 0;
+    for (const bone of rig.spine) rotateBoneWorld(bone, _right, pitch * 0.2 + lean / 3);
     rotateBoneWorld(rig.head, _right, pitch * 0.25);
 
     // 어깨 프레임: 어깨 중점에서 겨냥점을 본다
@@ -96,7 +100,7 @@ export class Character {
     this.gun.root.position.copy(gp).applyQuaternion(this.frameQ).add(_mid);
     this.gun.root.quaternion.copy(this.frameQ).multiply(gq);
     this.gun.applyParts(weapon);
-    attachHands(rig, this.gun, weapon, this.frameQ);
+    attachHands(rig, this.gun, weapon, this.frameQ, ledgeGrabWorld(player));
   }
 
   muzzleWorld(out: THREE.Vector3) {
@@ -111,4 +115,18 @@ export class Character {
   get gunQuat() {
     return this.gun.root.getWorldQuaternion(_q);
   }
+}
+
+/** 월드 좌표 모서리 짚기 목표(왼손은 몸 중심보다 조금 왼쪽) */
+export function ledgeGrabWorld(player: Player): LedgeGrab | undefined {
+  const m = player.mantle;
+  if (!m) return undefined;
+  // 어깨가 모서리보다 팔 길이 이상 올라가면 손을 뗀다(로봇 팔 길이 약 0.6m)
+  const shoulderY = player.pos.y + 1.35;
+  const reachK = THREE.MathUtils.clamp((m.edge.y + 0.55 - shoulderY) / 0.2, 0, 1);
+  const w = ledgeHandWeight(player.mantleProgress) * reachK;
+  if (w <= 0) return undefined;
+  const left = new THREE.Vector3(-m.fwd.z, 0, m.fwd.x).negate(); // fwd를 왼쪽으로 90도
+  const pos = m.edge.clone().addScaledVector(left, 0.2).addScaledVector(m.fwd, 0.06);
+  return { pos, fingers: m.fwd.clone(), palm: new THREE.Vector3(0, -1, 0), weight: w };
 }

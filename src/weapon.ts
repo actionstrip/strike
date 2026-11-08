@@ -8,7 +8,7 @@ import type { Player } from './player';
  * 자세는 "어깨 프레임"(양 어깨 중점, 시선 방향) 기준 GripR(총 원점)의 위치와 회전이다.
  */
 
-export type WeaponMode = 'idle' | 'walk' | 'sprint' | 'ads' | 'fire' | 'reload' | 'air';
+export type WeaponMode = 'idle' | 'walk' | 'sprint' | 'ads' | 'fire' | 'reload' | 'air' | 'mantle';
 
 /** 키 배열 [t, value] 사이를 smoothstep으로 잇는다. */
 function track(keys: [number, number][], t: number) {
@@ -84,6 +84,10 @@ export class Weapon {
   ads = 0;
   sprint = 0;
   air = 0;
+  /** 매달려 오르기 가중치(총 내림) */
+  mantle = 0;
+  /** 착지 직후 추가 퍼짐 남은 양 */
+  landSpread = 0;
   /** 재장전 진행도 0..1, 재장전 중이 아니면 -1 */
   reloadT = -1;
   /** 디버그: 재장전 진행도를 고정 */
@@ -104,6 +108,7 @@ export class Weapon {
   forceAds: boolean | null = null;
   forceFire = false;
   private reloadStages = new Set<string>();
+  private lastLand = 0;
 
   constructor(public events: WeaponEvents = {}) {}
 
@@ -113,6 +118,7 @@ export class Weapon {
 
   /** 현재 대표 상태(HUD와 디버그 표시용) */
   mode(player: Player): WeaponMode {
+    if (player.mantle) return 'mantle';
     if (this.reloading) return 'reload';
     if (!player.grounded) return 'air';
     if (this.cooldown > 0 && this.shotsFired > 0) return 'fire';
@@ -139,10 +145,23 @@ export class Weapon {
 
   update(dt: number, input: Input, player: Player) {
     this.firedThisFrame = false;
-    const wantAds = this.wantsAds(input) && !player.sprinting && !this.reloading;
-    this.ads = approach(this.ads, wantAds ? 1 : 0, dt / WEAPON.adsTime);
+    const mantling = !!player.mantle;
+    const wantAds = this.wantsAds(input) && !player.sprinting && !this.reloading && !mantling;
+    // 공중에서는 ADS 전환이 느리다
+    const adsTime = WEAPON.adsTime * (player.grounded || mantling ? 1 : WEAPON.adsTimeAirMul);
+    this.ads = approach(this.ads, wantAds ? 1 : 0, dt / adsTime);
+    // 오르는 동안 총을 내린다(올리는 쪽은 조금 빠르게)
+    this.mantle = damp(this.mantle, mantling ? 1 : 0, mantling ? 14 : 10, dt);
+    // 착지: 총이 아래로 눌렸다가 돌아오고, 잠깐 퍼짐이 커진다
+    if (player.landImpulse > this.lastLand + 0.05) {
+      this.recoilPos.v.y -= 0.4 * player.landImpulse;
+      this.recoilRot.v.x -= 0.45 * player.landImpulse;
+      this.landSpread = player.landImpulse;
+    }
+    this.lastLand = player.landImpulse;
+    this.landSpread = Math.max(0, this.landSpread - dt * 4);
     this.sprint = damp(this.sprint, player.sprinting ? 1 : 0, 10, dt);
-    this.air = damp(this.air, player.grounded ? 0 : 1, 8, dt);
+    this.air = damp(this.air, player.grounded && !mantling ? 0 : 1, 8, dt);
 
     if (input.pressed.has('KeyR')) this.startReload();
     // 달리기를 시작하면 재장전 취소(CoD 방식). 탄창은 원래대로 돌아간다.
@@ -152,7 +171,7 @@ export class Weapon {
 
     if (this.reloading) {
       if (this.reloadHold !== null) this.reloadT = this.reloadHold;
-      else this.reloadT += dt / WEAPON.reloadTime;
+      else if (!mantling) this.reloadT += dt / WEAPON.reloadTime; // 오르는 동안은 재장전 일시정지
       const st = (name: 'magOut' | 'magIn' | 'charger', at: number) => {
         if (this.reloadT >= at && !this.reloadStages.has(name)) {
           this.reloadStages.add(name);
@@ -176,7 +195,7 @@ export class Weapon {
 
     this.cooldown -= dt;
     const trigger = input.fire || this.forceFire;
-    const canFire = !player.sprinting && player.sprintOut <= 0 && !this.reloading;
+    const canFire = !player.sprinting && player.sprintOut <= 0 && !this.reloading && !mantling && this.mantle < 0.3;
     if (trigger && canFire && this.cooldown <= 0) {
       if (this.ammo > 0) {
         this.ammo--;
@@ -184,11 +203,12 @@ export class Weapon {
         this.shotsFired++;
         this.firedThisFrame = true;
         const adsK = 1 - this.ads * 0.55;
-        this.recoilPos.v.z += WEAPON.recoilKick * 60 * adsK;
-        this.recoilPos.v.y += 0.25 * adsK;
-        this.recoilRot.v.x += WEAPON.recoilRise * 60 * adsK;
-        this.recoilRot.v.y += (Math.random() - 0.5) * 1.2 * adsK;
-        this.recoilRot.v.z += (Math.random() - 0.5) * 2.0 * adsK;
+        // 스프링 속도 임펄스(m/s, rad/s). 최대 변위는 대략 임펄스/sqrt(k)
+        this.recoilPos.v.z += WEAPON.recoilKick * adsK;
+        this.recoilPos.v.y += 0.08 * adsK;
+        this.recoilRot.v.x += WEAPON.recoilRise * adsK;
+        this.recoilRot.v.y += (Math.random() - 0.5) * 0.3 * adsK;
+        this.recoilRot.v.z += (Math.random() - 0.5) * 0.5 * adsK;
         this.camKick.set(WEAPON.camKick * (0.8 + Math.random() * 0.4), (Math.random() - 0.5) * WEAPON.camKick * 0.6);
         this.events.onFire?.();
         if (this.ammo === 0 && this.reserve > 0) setTimeout(() => this.startReload(), 250);
@@ -236,6 +256,11 @@ export class Weapon {
     const spr = this.sprint * (1 - ads);
     outPos.lerp(P.sprint.pos, spr);
     outQuat.slerp(_q2.setFromEuler(P.sprint.rot), spr);
+    const mt = easeInOut(this.mantle);
+    if (mt > 0) {
+      outPos.lerp(P.mantle.pos, mt);
+      outQuat.slerp(_q2.setFromEuler(P.mantle.rot), mt);
+    }
     outPos.addScaledVector(P.viewOffset[view], 1 - ads);
 
     // 걸음 bob(8자)
@@ -262,13 +287,13 @@ export class Weapon {
     const airY = this.air * 0.02 - player.landImpulse * 0.03;
 
     outPos.x += bx + this.sway.x * 0.4 + rX;
-    outPos.y += by + bry + this.sway.y * 0.4 + rY + airY + this.recoilPos.x.y * 0.01;
-    outPos.z += this.recoilPos.x.z * 0.01 + rZ;
+    outPos.y += by + bry + this.sway.y * 0.4 + rY + airY + this.recoilPos.x.y;
+    outPos.z += this.recoilPos.x.z + rZ;
 
     _e.set(
-      rPitch + this.recoilRot.x.x * 0.01 + this.sway.y * 1.2 + by * 2,
-      this.sway.x * 1.5 + this.recoilRot.x.y * 0.01,
-      rRoll + Math.sin(ph) * bobAmp * 2 + this.sway.x * 2 + this.recoilRot.x.z * 0.01,
+      rPitch + this.recoilRot.x.x + this.sway.y * 1.2 + by * 2,
+      this.sway.x * 1.5 + this.recoilRot.x.y,
+      rRoll + Math.sin(ph) * bobAmp * 2 + this.sway.x * 2 + this.recoilRot.x.z,
       'XYZ',
     );
     outQuat.multiply(_q.setFromEuler(_e));
@@ -302,7 +327,7 @@ export class Weapon {
   spread(player: Player) {
     const move = Math.min(player.horizSpeed / 6, 1);
     const base = THREE.MathUtils.lerp(WEAPON.spreadHip, WEAPON.spreadAds, this.ads);
-    return base + move * WEAPON.spreadMove * (1 - this.ads * 0.8) + (player.grounded ? 0 : 0.04);
+    return base + move * WEAPON.spreadMove * (1 - this.ads * 0.8) + (player.grounded ? 0 : 0.04) + this.landSpread * WEAPON.spreadLand;
   }
 }
 
