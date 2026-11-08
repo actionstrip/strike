@@ -50,6 +50,12 @@ export class Player {
   /** 마지막으로 땅을 밟았던 높이(공중 오르기 한계 기준) */
   private groundY = 0;
   private wasGrounded = true;
+  /** C 토글로 정한 앉기 상태 */
+  crouchToggle = false;
+  /** 실제로 앉아 있는지(원하지 않아도 머리 위가 막히면 앉은 채로 있다) */
+  crouched = false;
+  /** 0=서기, 1=앉기 (자세, 눈높이, 충돌 높이가 같이 쓴다) */
+  crouchBlend = 0;
 
   constructor(private colliders: THREE.Box3[]) {}
 
@@ -70,6 +76,37 @@ export class Player {
     this.yaw -= input.mouseDX * k;
     this.pitch -= input.mouseDY * k;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -LOOK.pitchLimit, LOOK.pitchLimit);
+  }
+
+  /** 현재 충돌 높이 */
+  get height() {
+    return THREE.MathUtils.lerp(MOVE.height, MOVE.crouchHeight, this.crouchBlend);
+  }
+
+  /** 지금 자리에서 일어설 공간이 있는지 */
+  canStand() {
+    const r = MOVE.radius;
+    _box.min.set(this.pos.x - r, this.pos.y + 0.05, this.pos.z - r);
+    _box.max.set(this.pos.x + r, this.pos.y + MOVE.height, this.pos.z + r);
+    return !this.colliders.some((o) => o.intersectsBox(_box) && o.min.y > this.pos.y + 0.05);
+  }
+
+  private updateCrouch(dt: number, input: Input) {
+    if (input.crouchToggled()) this.crouchToggle = !this.crouchToggle;
+    const want = input.virtualCrouch ?? (this.crouchToggle || input.crouchHeld());
+    this.crouched = want || (this.crouched && !this.canStand());
+    const k = 1 - Math.exp(-MOVE.crouchRate * dt);
+    this.crouchBlend += ((this.crouched ? 1 : 0) - this.crouchBlend) * k;
+    if (Math.abs(this.crouchBlend - (this.crouched ? 1 : 0)) < 0.002) this.crouchBlend = this.crouched ? 1 : 0;
+  }
+
+  /** 앉기를 푼다(달리기, 점프, 오르기 시작). 머리 위가 막혀 있으면 풀지 못한다. */
+  private standUp(input: Input) {
+    if (!this.canStand()) return false;
+    this.crouchToggle = false;
+    if (input.virtualCrouch) input.virtualCrouch = false;
+    this.crouched = input.crouchHeld() && input.virtualCrouch === null;
+    return !this.crouched;
   }
 
   /** 오르기 진행도 0..1, 오르는 중이 아니면 -1 */
@@ -102,7 +139,7 @@ export class Player {
       _box.max.set(to.x + r, to.y + MOVE.height, to.z + r);
       if (this.colliders.some((o) => o.intersectsBox(_box))) continue;
       // 오르는 동안 머리 위가 막혀 있으면 안 된다
-      _box.min.set(this.pos.x - r * 0.8, this.pos.y + MOVE.height, this.pos.z - r * 0.8);
+      _box.min.set(this.pos.x - r * 0.8, this.pos.y + this.height, this.pos.z - r * 0.8);
       _box.max.set(this.pos.x + r * 0.8, c.max.y + MOVE.height, this.pos.z + r * 0.8);
       if (this.colliders.some((o) => o !== c && o.intersectsBox(_box))) continue;
       bestDist = dist;
@@ -113,6 +150,9 @@ export class Player {
 
   startMantle(l: Ledge) {
     const fwd = this.forward();
+    // 오르면 일어선다
+    this.crouchToggle = false;
+    this.crouched = false;
     const wall = l.edge.clone().addScaledVector(fwd, -(MOVE.radius + 0.02));
     this.mantle = {
       ...l, t: 0, dur: MANTLE.baseTime + MANTLE.timePerMeter * l.height,
@@ -156,17 +196,22 @@ export class Player {
     if (this.mantleCooldown > 0) this.mantleCooldown -= dt;
     if (this.mantle) {
       this.updateMantle(dt);
+      this.crouchBlend = Math.max(0, this.crouchBlend - dt * MOVE.crouchRate * 0.5);
       this.landImpulse = Math.max(0, this.landImpulse - dt * 4);
       return;
     }
+    this.updateCrouch(dt, input);
     const axis = input.moveAxis();
     const moving = axis.x !== 0 || axis.z !== 0;
-    const canSprint = input.sprintHeld() && axis.z > 0.5 && this.grounded && !opts.ads && !opts.wantsSprintBlocked;
+    let canSprint = input.sprintHeld() && axis.z > 0.5 && this.grounded && !opts.ads && !opts.wantsSprintBlocked;
+    // 달리기를 시작하면 일어선다(머리 위가 막혀 있으면 달리지 못한다)
+    if (canSprint && this.crouched) canSprint = this.standUp(input);
     if (this.sprinting && !canSprint) this.sprintOut = MOVE.sprintOutDelay;
     this.sprinting = canSprint;
     if (this.sprintOut > 0) this.sprintOut -= dt;
 
-    const speed = this.sprinting ? MOVE.sprint : opts.ads ? MOVE.adsWalk : MOVE.walk;
+    const walk = opts.ads ? MOVE.adsWalk : MOVE.walk;
+    const speed = this.sprinting ? MOVE.sprint : THREE.MathUtils.lerp(walk, Math.min(walk, MOVE.crouch), this.crouchBlend);
     const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
     const wishX = (axis.x * c + axis.z * -s) * (moving ? speed : 0);
     const wishZ = (axis.x * -s + axis.z * -c) * (moving ? speed : 0);
@@ -175,7 +220,15 @@ export class Player {
     this.vel.x += (wishX - this.vel.x) * f;
     this.vel.z += (wishZ - this.vel.z) * f;
 
-    if (this.grounded && input.pressed.has('Space')) {
+    const crouchLedge = this.grounded && this.crouched && input.pressed.has('Space') && this.mantleCooldown <= 0 && axis.z >= 0 ? this.findLedge() : null;
+    if (crouchLedge && crouchLedge.height > MANTLE.jumpOverHeight * 0.6) {
+      // 앉은 채 앞에 오를 턱이 있으면 바로 오른다(일어서며 오르기)
+      this.startMantle(crouchLedge);
+      return;
+    } else if (this.grounded && input.pressed.has('Space') && this.crouched) {
+      // 앉은 상태에서 Space는 점프하지 않고 일어서기만 한다
+      this.standUp(input);
+    } else if (this.grounded && input.pressed.has('Space')) {
       // 정면에 오를 모서리가 있으면 점프 대신 매달려 오른다
       const ledge = this.mantleCooldown <= 0 && axis.z >= 0 ? this.findLedge() : null;
       if (ledge && ledge.height > MANTLE.jumpOverHeight) {
@@ -218,7 +271,8 @@ export class Player {
       const run = this.runBlend();
       const strideWalk = CLIP.walkSpeed * 0.6; // 걷기 클립: 0.6초 주기
       const strideRun = CLIP.runSpeed * (16 / 30); // 달리기 클립: 16프레임 주기
-      const stride = strideWalk + (strideRun - strideWalk) * run;
+      const strideCrouch = CLIP.crouchSpeed * CLIP.crouchPeriod;
+      const stride = THREE.MathUtils.lerp(strideWalk + (strideRun - strideWalk) * run, strideCrouch, this.crouchBlend);
       this.gaitPhase = (this.gaitPhase + (hs * dt) / stride) % 1;
     }
     if (this.phaseHold !== null) this.gaitPhase = this.phaseHold;
@@ -235,7 +289,7 @@ export class Player {
     const r = MOVE.radius;
     const box = new THREE.Box3(
       new THREE.Vector3(this.pos.x - r, this.pos.y, this.pos.z - r),
-      new THREE.Vector3(this.pos.x + r, this.pos.y + MOVE.height, this.pos.z + r),
+      new THREE.Vector3(this.pos.x + r, this.pos.y + this.height, this.pos.z + r),
     );
     for (const c of this.colliders) {
       if (!box.intersectsBox(c)) continue;
@@ -248,15 +302,15 @@ export class Player {
       }
       if (axis === 'y') {
         if (d < 0) { this.pos.y = c.max.y; this.vel.y = 0; this.grounded = true; }
-        else { this.pos.y = c.min.y - MOVE.height; this.vel.y = 0; }
+        else { this.pos.y = c.min.y - this.height; this.vel.y = 0; }
       } else if (d > 0) {
         this.pos[axis] = c.min[axis] - r - 1e-4;
       } else {
         this.pos[axis] = c.max[axis] + r + 1e-4;
       }
       box.setFromCenterAndSize(
-        new THREE.Vector3(this.pos.x, this.pos.y + MOVE.height / 2, this.pos.z),
-        new THREE.Vector3(r * 2, MOVE.height, r * 2),
+        new THREE.Vector3(this.pos.x, this.pos.y + this.height / 2, this.pos.z),
+        new THREE.Vector3(r * 2, this.height, r * 2),
       );
     }
   }

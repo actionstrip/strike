@@ -8,7 +8,7 @@ import type { Player } from './player';
  * 자세는 "어깨 프레임"(양 어깨 중점, 시선 방향) 기준 GripR(총 원점)의 위치와 회전이다.
  */
 
-export type WeaponMode = 'idle' | 'walk' | 'sprint' | 'ads' | 'fire' | 'reload' | 'air' | 'mantle';
+export type WeaponMode = 'idle' | 'walk' | 'sprint' | 'ads' | 'fire' | 'reload' | 'air' | 'mantle' | 'crouch';
 
 /** 키 배열 [t, value] 사이를 smoothstep으로 잇는다. */
 function track(keys: [number, number][], t: number) {
@@ -86,6 +86,7 @@ export class Weapon {
   air = 0;
   /** 매달려 오르기 가중치(총 내림) */
   mantle = 0;
+  private lastCrouched = false;
   /** 착지 직후 추가 퍼짐 남은 양 */
   landSpread = 0;
   /** 재장전 진행도 0..1, 재장전 중이 아니면 -1 */
@@ -124,6 +125,7 @@ export class Weapon {
     if (this.cooldown > 0 && this.shotsFired > 0) return 'fire';
     if (this.ads > 0.5) return 'ads';
     if (player.sprinting) return 'sprint';
+    if (player.crouched) return 'crouch';
     return player.horizSpeed > 0.3 ? 'walk' : 'idle';
   }
 
@@ -159,6 +161,12 @@ export class Weapon {
       this.landSpread = player.landImpulse;
     }
     this.lastLand = player.landImpulse;
+    // 앉거나 일어서는 순간 총이 살짝 눌렸다가 돌아온다
+    if (player.crouched !== this.lastCrouched) {
+      this.recoilPos.v.y -= player.crouched ? 0.18 : -0.08;
+      this.recoilRot.v.x -= player.crouched ? 0.12 : -0.05;
+      this.lastCrouched = player.crouched;
+    }
     this.landSpread = Math.max(0, this.landSpread - dt * 4);
     this.sprint = damp(this.sprint, player.sprinting ? 1 : 0, 10, dt);
     this.air = damp(this.air, player.grounded && !mantling ? 0 : 1, 8, dt);
@@ -266,7 +274,7 @@ export class Weapon {
     // 걸음 bob(8자)
     const speed = player.grounded ? Math.min(player.horizSpeed / 6.2, 1) : 0;
     const ph = player.gaitPhase * Math.PI * 2;
-    const bobAmp = (0.012 + 0.02 * this.sprint) * speed * (1 - ads * 0.85) * bobScale;
+    const bobAmp = (0.012 + 0.02 * this.sprint) * speed * (1 - ads * 0.85) * bobScale * (1 - 0.4 * player.crouchBlend);
     const bx = Math.sin(ph) * bobAmp;
     const by = Math.cos(ph * 2) * bobAmp * 0.6;
     // 숨쉬기
@@ -327,7 +335,8 @@ export class Weapon {
   spread(player: Player) {
     const move = Math.min(player.horizSpeed / 6, 1);
     const base = THREE.MathUtils.lerp(WEAPON.spreadHip, WEAPON.spreadAds, this.ads);
-    return base + move * WEAPON.spreadMove * (1 - this.ads * 0.8) + (player.grounded ? 0 : 0.04) + this.landSpread * WEAPON.spreadLand;
+    const crouchK = THREE.MathUtils.lerp(1, WEAPON.spreadCrouchMul, player.crouchBlend);
+    return (base + move * WEAPON.spreadMove * (1 - this.ads * 0.8)) * crouchK + (player.grounded ? 0 : 0.04) + this.landSpread * WEAPON.spreadLand;
   }
 }
 

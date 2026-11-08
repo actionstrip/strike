@@ -9,6 +9,9 @@ export const ROBOT_SCALE = 1.8 / 0.768;
 export const CLIP = {
   walkSpeed: 2.6,
   runSpeed: 5.6,
+  /** 앉아 걷기 클립: 1.9m/s, 21프레임(0.7초) 주기 */
+  crouchSpeed: 1.9,
+  crouchPeriod: 0.7,
 };
 
 export const MOVE = {
@@ -21,6 +24,10 @@ export const MOVE = {
   gravity: 20,
   radius: 0.35,
   height: 1.8,
+  /** 앉기: 이동 속도, 충돌 높이, 전환 속도(1/초) */
+  crouch: 1.9,
+  crouchHeight: 1.25,
+  crouchRate: 11,
   /** 달리기를 끝낸 뒤 발사, 조준이 가능해지기까지의 지연 */
   sprintOutDelay: 0.18,
 };
@@ -58,6 +65,7 @@ export const FOV = {
 /** 3인칭 카메라: 어깨 뒤 오프셋(카메라 기준 x=오른쪽, y=위, z=뒤) */
 export const TP_CAM = {
   pivotHeight: 1.5,
+  pivotHeightCrouch: 1.05,
   offset: new THREE.Vector3(0.6, 0.18, 2.5),
   offsetAds: new THREE.Vector3(0.5, 0.12, 1.3),
   collisionPad: 0.2,
@@ -65,6 +73,7 @@ export const TP_CAM = {
 
 /** 1인칭 눈 위치 */
 export const EYE_HEIGHT = 1.62;
+export const EYE_HEIGHT_CROUCH = 1.08;
 
 /**
  * 무기 자세는 "어깨 프레임"(양 어깨 중점, 시선 방향) 기준의 GripR 위치와 회전이다.
@@ -101,6 +110,8 @@ export const WEAPON = {
   spreadHip: 0.02,
   spreadAds: 0.002,
   spreadMove: 0.025,
+  /** 앉으면 퍼짐에 곱하는 값 */
+  spreadCrouchMul: 0.75,
   /** 발사 1회 반동 임펄스: 뒤로(m/s), 총구 들림(rad/s) */
   recoilKick: 0.45,
   recoilRise: 0.55,

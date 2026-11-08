@@ -194,7 +194,7 @@ function step(dt: number, rawDt: number) {
   if (fpsAcc > 0.5) { fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
   hud.stats.textContent =
     `${fpsShown.toFixed(0)} fps  draw ${renderer.info.render.calls}\n` +
-    `상태 ${weapon.mode(player)}  속도 ${player.horizSpeed.toFixed(1)}m/s`;
+    `상태 ${weapon.mode(player)}${player.crouched && weapon.mode(player) !== 'crouch' ? '(앉기)' : ''}  속도 ${player.horizSpeed.toFixed(1)}m/s`;
   input.endFrame();
 }
 requestAnimationFrame(frame);
@@ -227,6 +227,11 @@ const debug = {
   timeScale(s: number) { timeScale = s; },
   teleport(x: number, z: number, y = 0) { player.mantle = null; player.mantleHold = null; player.pos.set(x, y, z); player.vel.set(0, 0, 0); },
   jump() { input.pressed.add('Space'); },
+  /** 앉기 강제(true/false), null이면 키 입력으로 돌아간다 */
+  crouch(on: boolean | null) { input.virtualCrouch = on; },
+  /** 키 누름 흉내(다음 step에서 처리). 예: 'KeyC' */
+  press(code: string) { input.pressed.add(code); },
+  hold(code: string, on: boolean) { if (on) input.keys.add(code); else input.keys.delete(code); },
   /** 오르기 진행도 고정(0..1, null 해제). 오르는 중이 아니면 정면 모서리로 오르기를 시작한다 */
   holdMantle(t: number | null) {
     if (t === null) { player.mantleHold = null; return; }
@@ -259,6 +264,8 @@ const debug = {
       reachTP: { ...character.rig.reachError }, reachFP: { ...viewmodel.rig.reachError },
       mantle: player.mantleProgress, canMantle: player.findLedge()?.height ?? null,
       ledgeTarget: character.rig.lastLeftTarget.toArray(), landImpulse: player.landImpulse, spread: weapon.spread(player),
+      crouched: player.crouched, crouchBlend: player.crouchBlend, height: player.height, canStand: player.canStand(),
+      eyeY: camRig.camera.position.y,
       view: camRig.view, viewBlend: camRig.viewBlend, pos: player.pos.toArray(), MOVE,
     };
   },

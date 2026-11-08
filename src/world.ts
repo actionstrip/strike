@@ -50,9 +50,9 @@ export class World {
     // 엄폐물과 벽
     const boxMat = new THREE.MeshStandardMaterial({ map: gridTexture('#b9a588', '#a8937a', '#cbb89a', 4), roughness: 0.85 });
     const wallMat = new THREE.MeshStandardMaterial({ map: gridTexture('#7a8590', '#6c7782', '#8c97a2', 4), roughness: 0.9 });
-    const box = (x: number, z: number, w: number, h: number, d: number, mat = boxMat, ry = 0) => {
+    const box = (x: number, z: number, w: number, h: number, d: number, mat = boxMat, ry = 0, y = 0) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      m.position.set(x, h / 2, z);
+      m.position.set(x, y + h / 2, z);
       m.rotation.y = ry;
       m.castShadow = true; m.receiveShadow = true;
       s.add(m);
@@ -82,6 +82,10 @@ export class World {
     box(16, -10, 3, 0.4, 3, boxMat);
     box(16, -13, 3, 0.8, 3, boxMat);
     box(16, -16, 3, 1.2, 3, boxMat);
+    // 앉아서만 지나갈 수 있는 낮은 통로(기둥 2개 + 1.35~1.6m 높이 가로대)
+    box(-20, -9, 0.4, 1.6, 1.4, wallMat);
+    box(-17.6, -9, 0.4, 1.6, 1.4, wallMat);
+    box(-18.8, -9, 2.0, 0.25, 1.4, wallMat, 0, 1.35);
 
     // 표적판
     const targetPos: [number, number][] = [[-3, -24], [2, -26], [7, -30], [-8, -32], [0, -40], [12, -22], [-14, -20]];

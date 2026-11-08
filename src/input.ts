@@ -10,12 +10,16 @@ export class Input {
   pressed = new Set<string>();
   /** 디버그용 가상 입력. null이 아니면 키보드 이동 대신 쓴다. */
   virtualMove: { x: number; z: number; sprint: boolean } | null = null;
+  /** 디버그용 가상 앉기. null이 아니면 키 대신 쓴다. */
+  virtualCrouch: boolean | null = null;
 
   constructor(private el: HTMLElement) {
     window.addEventListener('keydown', (e) => {
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+      // Ctrl(앉기)과 같이 누른 키가 브라우저 단축키로 가지 않게 막는다(Ctrl+W 같은 일부 키는 브라우저가 막지 못하게 한다)
+      if (this.locked && e.ctrlKey) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => { this.keys.clear(); this.fire = false; this.aim = false; });
@@ -58,6 +62,16 @@ export class Input {
 
   sprintHeld() {
     return this.virtualMove ? this.virtualMove.sprint : this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+  }
+
+  /** Ctrl을 누르고 있는 동안 앉는다 */
+  crouchHeld() {
+    return this.keys.has('ControlLeft') || this.keys.has('ControlRight');
+  }
+
+  /** C: 앉기 토글 */
+  crouchToggled() {
+    return this.pressed.has('KeyC');
   }
 
   endFrame() {

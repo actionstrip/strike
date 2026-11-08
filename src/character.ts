@@ -58,12 +58,23 @@ export class Character {
       Run: moveW * run,
       Air: air,
     };
+    // 앉기: 서 있는 하체 가중치를 줄이고 같은 방식으로 앉은 클립을 섞는다
+    const cb = player.crouchBlend * (1 - air);
+    if (player.crouchBlend > 0) {
+      const mw = THREE.MathUtils.smoothstep(hs, 0.15, 1.2);
+      for (const k of ['Idle', 'WalkF', 'WalkB', 'StrafeR', 'StrafeL', 'Run']) w[k] *= 1 - player.crouchBlend;
+      w.CrouchIdle = (1 - mw) * cb;
+      w.CrouchF = mw * cb * f;
+      w.CrouchB = mw * cb * b;
+      w.CrouchR = mw * cb * r;
+      w.CrouchL = mw * cb * l;
+    }
     this.idleTime += dt;
     for (const [name, a] of Object.entries(rig.actions)) {
       const wt = w[name] ?? 0;
       a.setEffectiveWeight(wt);
       const dur = a.getClip().duration;
-      a.time = name === 'Idle' ? this.idleTime % dur : name === 'Air' ? 0 : player.gaitPhase * dur;
+      a.time = name === 'Idle' || name === 'CrouchIdle' ? this.idleTime % dur : name === 'Air' ? 0 : player.gaitPhase * dur;
     }
     this.weights = w;
     rig.head.quaternion.copy(this.headRest); // 머리는 클립 트랙이 없으므로 매 프레임 초기화
