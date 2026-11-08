@@ -4,13 +4,9 @@
 //   node tools/build-desert.mjs --extract   # 3d/sandyards_standoff_2.glb 에서 텍스처를 잘라 tools/desert_tex/ 에 저장(원본 glb가 있을 때 한 번)
 //   node tools/build-desert.mjs             # tools/desert_tex/ -> scratch_build/map_desert_raw.glb + public/models/map_desert_colliders.json
 //   node tools/optimize-models.mjs          # -> public/models/map_desert.glb
-import { Document, NodeIO } from '@gltf-transform/core';
-import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import sharp from 'sharp';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-
-const TEX = 'tools/desert_tex';
-const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+import { mkdirSync } from 'node:fs';
+import { DECALS, TEX, createKit, io } from './mapkit.mjs';
 
 // ---------------------------------------------------------------- 텍스처 자르기
 // 원본 텍스처 번호: 0 = 건물/창 아틀라스, 1 = 모래 회벽(반복), 2 = 소품 아틀라스(문, 창, 상자), 3 = 바닥/벽 2×2 아틀라스
@@ -22,21 +18,7 @@ const TILES = {
   rust: { src: 2, rect: [4, 124, 100, 498], size: [128, 512] },
   planks: { src: 2, rect: [304, 74, 126, 172], size: 256 },
 };
-// 데칼 아틀라스: 4×4 칸(각 256²)에 늘려 넣는다. 실제 비율은 [w, h](m)로 붙일 때 맞춘다.
-const DECALS = {
-  crate: [112, 514, 102, 110],
-  crateBand: [112, 210, 176, 106],
-  doorBlue: [566, 414, 142, 196],
-  doorGreen: [663, 618, 110, 238],
-  doorWood: [327, 252, 106, 252],
-  doorCarved: [781, 618, 154, 238],
-  window: [860, 4, 160, 242],
-  windowSmall: [598, 862, 90, 126],
-  shutters: [424, 698, 70, 112],
-  ac: [502, 634, 56, 36],
-  doorPlank: [714, 344, 146, 262],
-  grate: [912, 862, 74, 122],
-};
+// 데칼 아틀라스 칸 목록(DECALS)은 mapkit.mjs에 있다(4×4 칸, 각 256²에 늘려 넣는다).
 
 async function extract() {
   const doc = await io.read('3d/sandyards_standoff_2.glb');
@@ -59,70 +41,7 @@ async function extract() {
   console.log('textures ->', TEX);
 }
 
-// ---------------------------------------------------------------- 지오메트리
-/** 재질별 버퍼 */
-const geo = {};
-const boxes = [];
-function buf(mat) {
-  return (geo[mat] ??= { pos: [], nrm: [], uv: [], idx: [] });
-}
-/** 바깥에서 볼 때 왼아래, 오른아래, 오른위, 왼위 순서의 사각형 */
-function quad(mat, p, n, uv) {
-  const b = buf(mat);
-  const base = b.pos.length / 3;
-  for (let i = 0; i < 4; i++) {
-    b.pos.push(...p[i]);
-    b.nrm.push(...n);
-    b.uv.push(...uv[i]);
-  }
-  b.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-}
-const decalNames = Object.keys(DECALS);
-function decalUV(name) {
-  const i = decalNames.indexOf(name);
-  const pad = 2 / 1024;
-  const u0 = (i % 4) / 4 + pad, v0 = Math.floor(i / 4) / 4 + pad, u1 = u0 + 0.25 - 2 * pad, v1 = v0 + 0.25 - 2 * pad;
-  // glTF uv: v=0이 이미지 위
-  return [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
-}
-/**
- * 축 정렬 상자. side/top은 재질 이름, tile은 반복 크기(m). decal을 주면 모든 면에 그 칸을 한 번씩.
- * collide=false면 충돌 박스를 만들지 않는다.
- */
-function box(x0, y0, z0, x1, y1, z1, { side, top = side, tile = 2, topTile = tile, decal = null, collide = true, bottom = false } = {}) {
-  if (collide) boxes.push([x0, y0, z0, x1, y1, z1]);
-  const wuv = (u0, u1, y0_, y1_, t) => [[u0 / t, -y0_ / t], [u1 / t, -y0_ / t], [u1 / t, -y1_ / t], [u0 / t, -y1_ / t]];
-  const faces = [
-    // +X: 바깥에서 보면 오른쪽이 -Z
-    { n: [1, 0, 0], p: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], u: [-z1, -z0] },
-    { n: [-1, 0, 0], p: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], u: [z0, z1] },
-    { n: [0, 0, 1], p: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], u: [x0, x1] },
-    { n: [0, 0, -1], p: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], u: [-x1, -x0] },
-  ];
-  for (const f of faces) quad(decal ? 'decals' : side, f.p, f.n, decal ? decalUV(decal) : wuv(f.u[0], f.u[1], y0, y1, tile));
-  const tp = [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]];
-  quad(decal ? 'decals' : top, tp, [0, 1, 0], decal ? decalUV(decal) : tp.map((q) => [q[0] / topTile, q[2] / topTile]));
-  if (bottom) {
-    const bp = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]];
-    quad(side, bp, [0, -1, 0], bp.map((q) => [q[0] / tile, q[2] / tile]));
-  }
-}
-/** 바닥 사각형(충돌 없음) */
-function floor(mat, x0, z0, x1, z1, y, tile) {
-  const p = [[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]];
-  quad(mat, p, [0, 1, 0], p.map((q) => [q[0] / tile, q[2] / tile]));
-}
-/** 벽면에 붙이는 데칼(문, 창). face: '+x' | '-x' | '+z' | '-z', at = 그 면의 좌표, c = 면을 따라 가운데 좌표, y0 = 아래 높이 */
-function decal(name, face, at, c, y0, w, h) {
-  const o = 0.07;
-  const y1 = y0 + h, a = c - w / 2, b = c + w / 2;
-  let p, n;
-  if (face === '+x') { n = [1, 0, 0]; const x = at + o; p = [[x, y0, b], [x, y0, a], [x, y1, a], [x, y1, b]]; }
-  else if (face === '-x') { n = [-1, 0, 0]; const x = at - o; p = [[x, y0, a], [x, y0, b], [x, y1, b], [x, y1, a]]; }
-  else if (face === '+z') { n = [0, 0, 1]; const z = at + o; p = [[a, y0, z], [b, y0, z], [b, y1, z], [a, y1, z]]; }
-  else { n = [0, 0, -1]; const z = at - o; p = [[b, y0, z], [a, y0, z], [a, y1, z], [b, y1, z]]; }
-  quad('decals', p, n, decalUV(name));
-}
+const { box, floor, decal, container, crate, write } = createKit();
 
 // ---------------------------------------------------------------- 배치
 // 크기 48 × 56m(바깥 벽 포함). 플레이어는 남쪽(+Z)에서 북쪽(-Z)을 보고 시작.
@@ -191,17 +110,6 @@ building(9, 20, 15, 27, 3.6, { '-x': 'doorGreen' });
 floor('paving', -7, -5, 7, 5, 0.01, 3);
 box(-1.3, 0, -1.3, 1.3, 0.9, 1.3, { side: 'stone', top: 'concrete', tile: 1.5 });
 
-/** 화물 컨테이너(2.44 × 2.6 × 6.06). along: 'x' | 'z' */
-function container(cx, cz, along, mat = 'rust', y = 0) {
-  const hw = 1.22, hl = 3.03, h = 2.6;
-  const [ax, az] = along === 'x' ? [hl, hw] : [hw, hl];
-  box(cx - ax, y, cz - az, cx + ax, y + h, cz + az, { side: mat, top: mat, tile: 2.6, topTile: 2.6 });
-}
-/** 나무 상자(s = 한 변) */
-function crate(cx, cz, s = 1.1, y = 0, kind = 'crate') {
-  box(cx - s / 2, y, cz - s / 2, cx + s / 2, y + s, cz + s / 2, { decal: kind });
-}
-
 // 가운데 큰길: 북쪽 컨테이너, 상자 엄폐
 container(0, -13, 'x', 'rustBlue');
 crate(-4.6, -8);
@@ -257,38 +165,10 @@ const MATS = {
 };
 
 async function build() {
-  const doc = new Document();
-  const buffer = doc.createBuffer();
-  const scene = doc.createScene('desert');
-  // 보관은 WebP, glb에는 PNG로 넣는다(optimize-models.mjs가 다시 WebP로 압축)
-  const png = {};
-  for (const name of new Set(Object.values(MATS).map((d) => d.tex))) png[name] = await sharp(readFileSync(`${TEX}/${name}.webp`)).png().toBuffer();
-  const textures = {};
-  const texture = (name) => (textures[name] ??= doc.createTexture(name).setImage(new Uint8Array(png[name])).setMimeType('image/png'));
-  let tris = 0;
-  for (const [mat, g] of Object.entries(geo)) {
-    const def = MATS[mat];
-    const m = doc.createMaterial(mat).setBaseColorFactor([...def.color, 1]).setRoughnessFactor(0.92).setMetallicFactor(0)
-      .setBaseColorTexture(texture(def.tex));
-    if (def.clamp) m.getBaseColorTextureInfo().setWrapS(33071).setWrapT(33071);
-    const acc = (type, arr, Ctor) => doc.createAccessor().setType(type).setArray(new Ctor(arr)).setBuffer(buffer);
-    const prim = doc.createPrimitive()
-      .setAttribute('POSITION', acc('VEC3', g.pos, Float32Array))
-      .setAttribute('NORMAL', acc('VEC3', g.nrm, Float32Array))
-      .setAttribute('TEXCOORD_0', acc('VEC2', g.uv, Float32Array))
-      .setIndices(acc('SCALAR', g.idx, Uint32Array))
-      .setMaterial(m);
-    scene.addChild(doc.createNode(mat).setMesh(doc.createMesh(mat).addPrimitive(prim)));
-    tris += g.idx.length / 3;
-  }
-  doc.getRoot().getAsset().extras = { note: 'Layout: original. Textures cropped from "sandyards standoff 2" by frostychaos144 (CC BY 4.0).' };
-  mkdirSync('scratch_build', { recursive: true });
-  await io.write('scratch_build/map_desert_raw.glb', doc);
-  const r = (v) => Math.round(v * 1000) / 1000;
-  const maxY = Math.max(...boxes.map((b) => b[4]));
-  const col = { source: 'tools/build-desert.mjs', scale: 1, cell: 0, bounds: [-W, 0, -D, W, r(maxY), D], boxes: boxes.map((b) => b.map(r)) };
-  writeFileSync('public/models/map_desert_colliders.json', JSON.stringify(col));
-  console.log(`map_desert_raw.glb: ${Object.keys(geo).length} materials, ${tris} triangles; colliders: ${boxes.length} boxes`);
+  await write({
+    name: 'desert', mats: MATS, bounds: [-W, -D, W, D],
+    note: 'Layout: original. Textures cropped from "sandyards standoff 2" by frostychaos144 (CC BY 4.0).',
+  });
 }
 
 if (process.argv.includes('--extract')) await extract();

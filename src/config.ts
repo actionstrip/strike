@@ -298,6 +298,14 @@ export const MAPS: MapDef[] = [
     area: [-22.6, -26.6, 22.6, 26.6],
   },
   {
+    id: 'port', name: '항구 창고', desc: '선반 통로가 있는 큰 창고와 컨테이너 야적장, 연료 탱크', size: '52 × 56m',
+    thumb: 'images/map_port.webp', glb: 'models/map_port.glb', colliders: 'models/map_port_colliders.json',
+    enemies: [9, 7], pickups: 8, fog: [50, 125],
+    // 남쪽 정문 안쪽 방호벽 뒤에서 북쪽(창고)을 보고 시작
+    spawn: { x: 0, z: 26, yaw: 0 },
+    area: [-25.6, -25.4, 25.6, 29.6],
+  },
+  {
     id: 'test', name: '시험장', desc: '엄폐 상자와 표적판이 있는 연습 맵', size: '86 × 86m',
     thumb: '', glb: null, colliders: null,
     enemies: [ENEMY.count, ENEMY2.count], pickups: 4, fog: [60, 160],

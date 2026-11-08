@@ -62,4 +62,6 @@ await run('scratch_build/map_raw.glb', 'public/models/map.glb', { merge: true })
 await run('scratch_build/map_backrooms_raw.glb', 'public/models/map_backrooms.glb', { merge: true });
 // 사막 마을: tools/build-desert.mjs가 만든 박스 맵(같은 재질끼리 이미 한 메시)
 await run('scratch_build/map_desert_raw.glb', 'public/models/map_desert.glb');
+// 항구 창고: tools/build-port.mjs가 만든 박스 맵
+await run('scratch_build/map_port_raw.glb', 'public/models/map_port.glb');
 await run('3d/enermy2_robot.glb', 'public/models/enemy2_robot.glb', { specGloss: true });
