@@ -245,6 +245,9 @@ export class Enemy {
       this.hitBoxes.push(b);
     }
     this.lifeBar = new LifeBar(this.root, 2.15);
+    // 덩치 배율: 루트 아래 전부(모델, 총, 섬광, 피격 박스)가 함께 줄어든다. 라이프바는 읽기 좋게 크기를 덜 줄인다.
+    this.root.scale.setScalar(ENEMY.size);
+    this.lifeBar.sprite.scale.multiplyScalar(0.8 / ENEMY.size);
     this.lifeBar.draw(this.hp, ENEMY.health, 0);
     this.flash = new MuzzleFlash(this.muzzle, flashTex, 0.35);
   }
@@ -305,7 +308,7 @@ export class Enemy {
     const aim = this.aimPoint;
     if (this.state === 'search') aim.set(this.lastSeen.x, this.lastSeen.y + 1.3, this.lastSeen.z);
     else if (this.state === 'combat') aim.set(player.pos.x, (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
-    else this.forward(aim).multiplyScalar(5).add(this.root.position).setY(1.2);
+    else this.forward(aim).multiplyScalar(5).add(this.root.position).setY(this.root.position.y + 1.2 * ENEMY.size);
     this.animate(dt, aim);
     // 라이프 바: 맞은 직후 흰색으로 반짝인다
     if (this.alive) this.lifeBar.draw(this.hp, ENEMY.health, this.hitFlash);
@@ -519,7 +522,7 @@ export class Enemy {
     // 걷기 비중은 순간적으로 바뀌지 않게(발과 손이 튀지 않도록) 약 0.15초에 걸쳐 따라간다
     this.stepW += (THREE.MathUtils.smoothstep(stepSpeed, 0.05, 0.6) - this.stepW) * (1 - Math.exp(-dt / 0.15));
     const walkW = this.stepW * (1 - deathW);
-    this.phase = (this.phase + (stepSpeed * dt) / ENEMY.walkStride) % 1;
+    this.phase = (this.phase + (stepSpeed * dt) / (ENEMY.walkStride * ENEMY.size)) % 1;
     this.idleT += dt;
     a.Walk.setEffectiveWeight(walkW);
     a.Walk.time = this.phase * a.Walk.getClip().duration;

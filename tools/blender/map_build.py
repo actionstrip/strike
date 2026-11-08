@@ -4,7 +4,7 @@
 Blender에서 실행:  exec(open(r'C:/inetpub/wwwroot/test/shooting/tools/blender/map_build.py', encoding='utf-8').read())
 단계별로 쓸 수 있게 함수로 나눴다. build()가 전체를 돌린다.
 
-- 가져온 뒤 모든 변환을 적용하고 SCALE배 키운다(캐릭터 1.8~1.9m 기준으로 상자 1.0~1.25m, 벽 5m).
+- 가져온 뒤 모든 변환을 적용하고 SCALE배 키운다(캐릭터 1.8m 기준으로 문 1.93m, 상자 1.1~1.4m, 벽 5.5m).
 - 작은데 삼각형이 많은 소품은 Decimate.
 - 충돌: 물체마다 BVH를 만들고 CELL 간격 (x,y) 기둥마다 아래에서 위로 레이를 쏴서 들어감(법선 아래)/나감(법선 위) 구간을 얻는다.
   같은 높이 구간을 가진 이웃 기둥을 직사각형으로 합쳐 박스를 만든다. 문, 창, 통로는 뚫린 채로 남고 경사로는 잘게 나뉜 계단이 된다.
@@ -21,7 +21,7 @@ ROOT = r'C:/inetpub/wwwroot/test/shooting'
 SRC = ROOT + '/3d/map.glb'
 OUT_GLB = ROOT + '/scratch_build/map_raw.glb'
 OUT_JSON = ROOT + '/public/models/map_colliders.json'
-SCALE = 2.5
+SCALE = 2.75
 CELL = 0.125
 # 이 이상 삼각형을 가진 작은 소품은 줄인다.
 # 이 맵에서 대상은 판자를 엮은 상자 30개뿐인데, 면이 모두 실제 판자라 Decimate하면 가시처럼 깨진다(평면 병합으로도 줄지 않음).
@@ -122,6 +122,31 @@ def decimate_props(meshes):
     return {'decimated': n, 'tris_before': before, 'tris_after': after}
 
 
+_HDIRS = [Vector((1, 0, 0)), Vector((-1, 0, 0)), Vector((0, 1, 0)), Vector((0, -1, 0))]
+
+
+def inside(bvh, p):
+    """수평 4방향 레이로 안쪽 판정: 가장 가까운 면을 뒤에서(안에서) 만나는 방향이 3개 이상이면 안쪽."""
+    n = 0
+    for d in _HDIRS:
+        hit, normal, _i, _d = bvh.ray_cast(p, d, 60.0)
+        if hit is not None and normal.dot(d) > 0:
+            n += 1
+    return n >= 3
+
+
+def solid_bottom(bvh, x, y, lo, hi):
+    """아랫면 없이 윗면을 만났을 때 실제로 막힌 구간의 바닥 높이.
+    문틀 윗부분(인방)처럼 아랫면이 빠진 메시에서 문 구멍까지 막히지 않도록,
+    아래부터 올라가며 처음으로 '안쪽'인 높이를 찾는다."""
+    z = lo + 0.025
+    while z < hi - 0.01:
+        if inside(bvh, Vector((x, y, z))):
+            return max(lo, z - 0.025)
+        z += 0.05
+    return hi
+
+
 def column_intervals(meshes):
     """(i, j) 격자 기둥 -> 높이 구간 목록(z0, z1). Blender 좌표(Z 위)."""
     dg = bpy.context.evaluated_depsgraph_get()
@@ -161,7 +186,7 @@ def column_intervals(meshes):
                         if enter is None:
                             enter = hit.z
                     elif normal.z > 0.05:
-                        start = enter if enter is not None else floor_z
+                        start = enter if enter is not None else solid_bottom(bvh, x, y, floor_z, hit.z)
                         if hit.z - start > 0.02:
                             cols.setdefault((i, j), []).append((start, hit.z))
                         enter = None

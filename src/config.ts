@@ -126,13 +126,16 @@ export const HAND = {
 
 /** 적 로봇 */
 export const ENEMY = {
+  /** 덩치 배율(원래 키 1.9m). 모델, 총, 피격 박스, 보폭, 충돌 크기에 함께 적용된다. */
+  size: 0.5,
   /** 맵(21×41m)에 맞춘 적 수 */
   count: 5,
   health: 5,
   /** 걷기 클립(제자리 걸음)이 한 주기 동안 앞으로 가는 거리(m)와 주기(초). tools/blender/enemy.blend와 맞춘다. */
   walkStride: 1.51,
   walkPeriod: 1.6,
-  patrolSpeed: 1.2,
+  /** 작아진 다리에 맞춘 순찰 속도(원래 키에서는 1.2) */
+  patrolSpeed: 0.8,
   patrolRadius: 6,
   /** 배치: 플레이어와, 적끼리 최소 거리 */
   spawnFromPlayer: 12,
@@ -166,8 +169,8 @@ export const ENEMY = {
   spread: THREE.MathUtils.degToRad(2),
   /** 시야를 잃은 뒤 마지막 위치를 바라보는 시간 */
   searchTime: 3,
-  radius: 0.4,
-  height: 1.9,
+  radius: 0.4 * 0.5,
+  height: 1.9 * 0.5,
   /** 사망 후 회색으로 바뀌는 시간 */
   greyTime: 1.0,
 };
