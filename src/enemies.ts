@@ -53,6 +53,21 @@ export class Enemies {
 
   update(dt: number, player: Player, playerHead: THREE.Vector3, world: WorldRefs, hooks: EnemyHooks) {
     for (const e of this.list) e.update(dt, player, playerHead, world, hooks);
+    // 전투를 시작한 적은 근처 동료에게 알린다(동료는 그곳으로 수색하러 온다)
+    for (const e of this.list) {
+      if (!e.alertOthers) continue;
+      e.alertOthers = false;
+      for (const o of this.list) {
+        if (o !== e && o.root.position.distanceTo(e.root.position) < o.cfg.alertRadius) o.hear(e.lastSeen);
+      }
+    }
+  }
+
+  /** 소리(플레이어 총소리): 들리는 거리 안의 적은 그곳을 수색하러 간다 */
+  noise(at: THREE.Vector3) {
+    for (const e of this.list) {
+      if (e.root.position.distanceTo(at) < e.cfg.hearRange) e.hear(at);
+    }
   }
 
   get aliveCount() {

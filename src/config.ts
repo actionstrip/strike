@@ -136,11 +136,12 @@ export const ENEMY = {
   walkPeriod: 1.6,
   /** 작아진 다리에 맞춘 순찰 속도(원래 키에서는 1.2) */
   patrolSpeed: 0.8,
-  patrolRadius: 6,
+  /** 순찰 범위: 시작점에서 이 반경 안을 돌아다닌다 */
+  patrolRadius: 10,
   /** 배치: 플레이어와의 최소 거리(적끼리는 enemies.ts에서 서로 가장 먼 자리부터 골라 퍼뜨린다) */
   spawnFromPlayer: 12,
-  /** 서서 두리번거리는 시간 범위(초) */
-  lookTime: [4.5, 7] as [number, number],
+  /** 서서 두리번거리는 시간 범위(초). 짧을수록 자주 걷는다. */
+  lookTime: [1.5, 3.2] as [number, number],
   /** 걷다가 방향을 바꿀 때 몸 회전 속도 */
   turnSpeed: THREE.MathUtils.degToRad(90),
   /** 전투 중 몸 회전 속도(상체 비틀림 한계를 넘을 때) */
@@ -153,7 +154,7 @@ export const ENEMY = {
   /** 고개 돌리는 스프링 강성(클수록 빠름). 4.5면 60° 돌리는 데 약 1초, 최고 속도 약 100°/s */
   headSpring: 4.5,
   /** 한 방향을 보고 멈춰 있는 시간 범위(초) */
-  glanceHold: [0.7, 1.4] as [number, number],
+  glanceHold: [0.4, 0.9] as [number, number],
   /** 시야: 전체 각도와 거리 */
   fov: THREE.MathUtils.degToRad(110),
   sightRange: 30,
@@ -166,8 +167,23 @@ export const ENEMY = {
   burstInterval: 0.2,
   burstPause: [0.8, 1.3] as [number, number],
   spread: THREE.MathUtils.degToRad(2),
-  /** 시야를 잃은 뒤 마지막 위치를 바라보는 시간 */
-  searchTime: 3,
+  /** 시야를 잃은 뒤(또는 소리를 들은 뒤) 그곳에 가서 둘러보는 시간 */
+  searchTime: 4,
+  /** 전투 중 자리 옮기기: 공격(점사/레이저) 몇 번 뒤 옆으로 몇 m, 걷는 속도 */
+  volleysBeforeMove: [1, 2] as [number, number],
+  moveDist: [1.5, 3.5] as [number, number],
+  combatSpeed: 1.25,
+  /** 맞으면 피하기: 속도, 다시 피할 수 있을 때까지, 엄폐(플레이어가 못 보는 자리)를 고를 확률, 엄폐 뒤 머무는 시간 */
+  dodgeSpeed: 1.8,
+  dodgeCooldown: 1.2,
+  coverChance: 0.65,
+  coverHold: [0.8, 1.8] as [number, number],
+  /** 수색: 마지막으로 본 곳까지 걸어가는 속도 */
+  searchSpeed: 1.0,
+  /** 발견하거나 맞으면 이 반경 안의 동료에게 알린다 */
+  alertRadius: 12,
+  /** 플레이어 총소리를 듣는 거리 */
+  hearRange: 16,
   radius: 0.4 * 0.5,
   height: 1.9 * 0.5,
   /** 사망 후 회색으로 바뀌는 시간 */
@@ -190,6 +206,11 @@ export const ENEMY2 = {
   walkStride: 7.6 * 0.085 * 0.7,
   /** 작아진 다리에 맞춘 순찰 속도(처음 크기에서는 0.7) */
   patrolSpeed: 0.55,
+  /** 다리가 짧아 전투 이동, 피하기, 수색 속도도 느리다. 레이저는 한 번 쏘고 옮긴다. */
+  combatSpeed: 0.85,
+  dodgeSpeed: 1.25,
+  searchSpeed: 0.7,
+  volleysBeforeMove: [1, 1] as [number, number],
   /** 몸통(카메라)이 다리 기준으로 좌우로 돌아가는 한계 */
   headMax: THREE.MathUtils.degToRad(70),
   twistMax: THREE.MathUtils.degToRad(50),

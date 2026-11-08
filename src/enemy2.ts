@@ -196,6 +196,10 @@ export class WalkerEnemy extends Enemy {
     this.chargeT = 0;
   }
 
+  protected weaponBusy() {
+    return this.chargeT > 0;
+  }
+
   /** 조준이 맞으면 충전을 시작한다. 발사는 충전이 끝날 때 weaponTick에서. */
   protected attack(_player: Player, _playerHead: THREE.Vector3, hooks: EnemyHooks) {
     this.chargeT = ENEMY2.chargeTime;

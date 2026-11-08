@@ -50,8 +50,6 @@ export class Player {
   /** 마지막으로 땅을 밟았던 높이(공중 오르기 한계 기준) */
   private groundY = 0;
   private wasGrounded = true;
-  /** C 토글로 정한 앉기 상태 */
-  crouchToggle = false;
   /** 실제로 앉아 있는지(원하지 않아도 머리 위가 막히면 앉은 채로 있다) */
   crouched = false;
   /** 0=서기, 1=앉기 (자세, 눈높이, 충돌 높이가 같이 쓴다) */
@@ -92,8 +90,7 @@ export class Player {
   }
 
   private updateCrouch(dt: number, input: Input) {
-    if (input.crouchToggled()) this.crouchToggle = !this.crouchToggle;
-    const want = input.virtualCrouch ?? (this.crouchToggle || input.crouchHeld());
+    const want = input.virtualCrouch ?? input.crouchHeld();
     this.crouched = want || (this.crouched && !this.canStand());
     const k = 1 - Math.exp(-MOVE.crouchRate * dt);
     this.crouchBlend += ((this.crouched ? 1 : 0) - this.crouchBlend) * k;
@@ -103,7 +100,6 @@ export class Player {
   /** 앉기를 푼다(달리기, 점프, 오르기 시작). 머리 위가 막혀 있으면 풀지 못한다. */
   private standUp(input: Input) {
     if (!this.canStand()) return false;
-    this.crouchToggle = false;
     if (input.virtualCrouch) input.virtualCrouch = false;
     this.crouched = input.crouchHeld() && input.virtualCrouch === null;
     return !this.crouched;
@@ -151,7 +147,6 @@ export class Player {
   startMantle(l: Ledge) {
     const fwd = this.forward();
     // 오르면 일어선다
-    this.crouchToggle = false;
     this.crouched = false;
     const wall = l.edge.clone().addScaledVector(fwd, -(MOVE.radius + 0.02));
     this.mantle = {
