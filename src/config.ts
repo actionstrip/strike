@@ -134,9 +134,20 @@ export const ENEMY = {
   patrolSpeed: 1.2,
   patrolRadius: 8,
   /** 서서 두리번거리는 시간 범위(초) */
-  lookTime: [2, 4] as [number, number],
-  turnSpeed: THREE.MathUtils.degToRad(120),
-  combatTurnSpeed: THREE.MathUtils.degToRad(150),
+  lookTime: [4.5, 7] as [number, number],
+  /** 걷다가 방향을 바꿀 때 몸 회전 속도 */
+  turnSpeed: THREE.MathUtils.degToRad(90),
+  /** 전투 중 몸 회전 속도(상체 비틀림 한계를 넘을 때) */
+  combatTurnSpeed: THREE.MathUtils.degToRad(120),
+  /** 사람처럼: 고개는 몸 정면 기준 좌우 최대 60°, 상체 비틀림은 최대 45° */
+  headMax: THREE.MathUtils.degToRad(60),
+  twistMax: THREE.MathUtils.degToRad(45),
+  /** 전투 중 목표가 몸 정면에서 이 각보다 벗어나면 발을 떼서 몸을 다시 정렬한다(그 안은 상체와 팔만 따라감) */
+  realignAngle: THREE.MathUtils.degToRad(25),
+  /** 고개 돌리는 스프링 강성(클수록 빠름). 4.5면 60° 돌리는 데 약 1초, 최고 속도 약 100°/s */
+  headSpring: 4.5,
+  /** 한 방향을 보고 멈춰 있는 시간 범위(초) */
+  glanceHold: [0.7, 1.4] as [number, number],
   /** 시야: 전체 각도와 거리 */
   fov: THREE.MathUtils.degToRad(110),
   sightRange: 30,

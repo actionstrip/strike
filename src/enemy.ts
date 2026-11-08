@@ -143,7 +143,28 @@ export class Enemy {
   private idleT = Math.random() * 2;
   private stateT = 0;
   private lookT = 0;
+  /** 머리가 몸 정면 기준으로 돌아간 각(목+머리), 목표, 각속도 */
   private headYaw = 0;
+  private headTarget = 0;
+  private headVel = 0;
+  /** 상체 비틀림(골반 기준), 목표 */
+  private twist = 0;
+  private twistTarget = 0;
+  /** 다음 시선 목표로 넘어가기까지 남은 시간 */
+  private glanceT = 0;
+  private glanceSide = 1;
+  /** 이번 프레임 몸 회전 속도(rad/s): 제자리 돌 때 발을 떼게 한다 */
+  private turnRate = 0;
+  /** 걷기 클립 비중(부드럽게 오르내림) */
+  private stepW = 0;
+  /** 전투 중 몸을 다시 정렬하는 중인지 */
+  private realign = false;
+  /**
+   * 절차적 회전(두리번, 조준)을 넣기 전의 클립 자세.
+   * AnimationMixer는 트랙 값이 지난 프레임과 같으면 뼈에 다시 쓰지 않으므로(걷기 클립의 몸통처럼 고정된 트랙),
+   * 매 프레임 이 자세로 되돌려 놓지 않으면 절차적 회전이 계속 쌓여 몸이 빙글빙글 돈다.
+   */
+  private restQ: [THREE.Bone, THREE.Quaternion][] = [];
   private sightT = Math.random() * ENEMY.sightInterval;
   private searchT = 0;
   private burstLeft = 0;
@@ -176,6 +197,7 @@ export class Enemy {
       m.material = Array.isArray(m.material) ? mats : mats[0];
     });
     for (const n of ['Root', 'Spine', 'Neck', 'Head', 'ArmR', 'ForeArmR', 'WristR', 'HandR']) this.bones[n] = bone(this.model, n);
+    for (const n of ['Spine', 'Neck', 'Head', 'ArmR', 'ForeArmR', 'WristR', 'HandR']) this.restQ.push([this.bones[n], this.bones[n].quaternion.clone()]);
 
     this.mixer = new THREE.AnimationMixer(this.model);
     for (const [name, clip] of Object.entries(assets.enemyClips)) {
@@ -305,16 +327,30 @@ export class Enemy {
 
     if (this.state === 'combat' || this.state === 'search') {
       this.speed = 0;
-      const want = Math.atan2(-(this.lastSeen.x - pos.x), -(this.lastSeen.z - pos.z));
-      this.yaw = turnToward(this.yaw, want, ENEMY.combatTurnSpeed * dt);
-      this.headYaw *= Math.exp(-8 * dt);
+      // 보이는 동안은 지금 위치, 안 보이면 마지막으로 본 곳
+      const tgt = this.seesPlayer ? player.pos : this.lastSeen;
+      const want = Math.atan2(-(tgt.x - pos.x), -(tgt.z - pos.z));
+      // 작은 움직임은 상체와 팔로만 따라가고, 많이 벗어나면 발을 떼서 몸을 정렬한다(정렬이 끝날 때까지)
+      const off = Math.abs(angDiff(want, this.yaw));
+      if (off > ENEMY.realignAngle) this.realign = true;
+      if (this.realign) {
+        const rate = off > ENEMY.twistMax * 0.8 ? ENEMY.combatTurnSpeed : ENEMY.combatTurnSpeed * 0.6;
+        this.turnBody(want, rate, dt);
+        if (Math.abs(angDiff(want, this.yaw)) < THREE.MathUtils.degToRad(3)) this.realign = false;
+      } else {
+        this.turnRate = 0;
+      }
+      const rest = angDiff(want, this.yaw);
+      this.twistTarget = THREE.MathUtils.clamp(rest, -ENEMY.twistMax, ENEMY.twistMax);
+      this.headTarget = THREE.MathUtils.clamp(rest, -ENEMY.headMax, ENEMY.headMax);
       if (!this.seesPlayer) {
         this.searchT -= dt;
         this.state = 'search';
         if (this.searchT <= 0) {
           this.state = 'look';
-          this.lookT = 1.5 + this.rand();
+          this.lookT = THREE.MathUtils.lerp(ENEMY.lookTime[0], ENEMY.lookTime[1], this.rand());
           this.stateT = 0;
+          this.glanceT = 0.6;
         }
       } else {
         this.state = 'combat';
@@ -336,24 +372,29 @@ export class Enemy {
     if (this.state === 'look') {
       // 서서 좌우로 두리번거린다
       this.speed = Math.max(0, this.speed - dt * 3);
-      this.headYaw = 1.0 * Math.sin(this.stateT * 0.9);
+      this.turnRate = 0;
+      this.twistTarget = 0;
+      this.scan(dt, ENEMY.headMax, 0.3);
       this.lookT -= dt;
       if (this.lookT <= 0) this.pickWaypoint(world.colliders);
     } else if (this.state === 'walk') {
       const to = _v.subVectors(this.waypoint, pos).setY(0);
       const dist = to.length();
       const want = Math.atan2(-to.x, -to.z);
-      this.yaw = turnToward(this.yaw, want, ENEMY.turnSpeed * dt);
+      this.turnBody(want, ENEMY.turnSpeed, dt);
+      this.twistTarget = 0;
       const align = Math.max(0, Math.cos(angDiff(want, this.yaw)));
       const target = ENEMY.patrolSpeed * THREE.MathUtils.smoothstep(align, 0.7, 1) * Math.min(1, dist / 0.6 + 0.3);
       this.speed += (target - this.speed) * (1 - Math.exp(-6 * dt));
-      this.headYaw = 0.25 * Math.sin(this.stateT * 0.7);
+      // 걸을 때는 가끔 옆을 힐끗 본다
+      this.scan(dt, THREE.MathUtils.degToRad(30), 0.55);
       const step = this.forward(_v2).multiplyScalar(this.speed * dt);
       const next = _v3.copy(pos).add(step);
       if (this.blocked(next, world.colliders)) {
         this.state = 'look';
-        this.lookT = 1 + this.rand() * 2;
+        this.lookT = 1.5 + this.rand() * 2;
         this.stateT = 0;
+        this.glanceT = 0.5;
       } else {
         pos.copy(next);
       }
@@ -361,7 +402,32 @@ export class Enemy {
         this.state = 'look';
         this.lookT = THREE.MathUtils.lerp(ENEMY.lookTime[0], ENEMY.lookTime[1], this.rand());
         this.stateT = 0;
+        this.glanceT = 0.5;
       }
+    }
+  }
+
+  /** 몸(다리) 방향을 돌리고, 회전 속도를 기록한다(제자리 발걸음용) */
+  private turnBody(want: number, rate: number, dt: number) {
+    const before = this.yaw;
+    this.yaw = turnToward(this.yaw, want, rate * dt);
+    this.turnRate = dt > 0 ? Math.abs(angDiff(this.yaw, before)) / dt : 0;
+  }
+
+  /**
+   * 사람처럼 둘러보기: 한쪽을 보고 잠깐 멈췄다가 반대쪽, 가끔 정면.
+   * max: 좌우 최대 각, centerChance: 다음 시선이 정면일 확률
+   */
+  private scan(dt: number, max: number, centerChance: number) {
+    // 머리가 목표에 거의 닿은 뒤부터 멈춤 시간을 센다
+    if (Math.abs(this.headTarget - this.headYaw) < 0.06) this.glanceT -= dt;
+    if (this.glanceT > 0) return;
+    this.glanceT = THREE.MathUtils.lerp(ENEMY.glanceHold[0], ENEMY.glanceHold[1], this.rand());
+    if (this.headTarget !== 0 && this.rand() < centerChance) {
+      this.headTarget = 0;
+    } else {
+      this.glanceSide = -this.glanceSide;
+      this.headTarget = this.glanceSide * max * THREE.MathUtils.lerp(0.6, 1, this.rand());
     }
   }
 
@@ -404,7 +470,7 @@ export class Enemy {
     const to = _v2.subVectors(playerHead, head);
     const dist = to.length();
     if (dist > ENEMY.sightRange) return false;
-    const lookYaw = this.yaw + this.headYaw * 0.9;
+    const lookYaw = this.yaw + this.headYaw;
     const fwd = _v3.set(-Math.sin(lookYaw), 0, -Math.cos(lookYaw));
     const flat = Math.hypot(to.x, to.z) || 1e-6;
     const cos = (to.x * fwd.x + to.z * fwd.z) / flat;
@@ -437,8 +503,18 @@ export class Enemy {
     const dead = this.deathT >= 0;
     if (dead) this.deathT += dt;
     const deathW = dead ? Math.min(1, this.deathT / 0.15) : 0;
-    const walkW = THREE.MathUtils.smoothstep(this.speed, 0.05, 0.6) * (1 - deathW);
-    this.phase = (this.phase + (this.speed * dt) / ENEMY.walkStride) % 1;
+    // 고개와 상체: 스프링으로 사람처럼 가속/감속(목표가 바뀌어도 순간이동하지 않는다)
+    const k = ENEMY.headSpring;
+    this.headVel += (k * k * (this.headTarget - this.headYaw) - 2 * k * this.headVel) * dt;
+    this.headYaw += this.headVel * dt;
+    this.twist += (this.twistTarget - this.twist) * (1 - Math.exp(-8 * dt));
+    for (const [b, q] of this.restQ) b.quaternion.copy(q);
+    // 제자리에서 돌 때도 발을 뗀다(1rad 도는 동안 약 0.5m 걷는 만큼)
+    const stepSpeed = Math.max(this.speed, this.turnRate * 0.5);
+    // 걷기 비중은 순간적으로 바뀌지 않게(발과 손이 튀지 않도록) 약 0.15초에 걸쳐 따라간다
+    this.stepW += (THREE.MathUtils.smoothstep(stepSpeed, 0.05, 0.6) - this.stepW) * (1 - Math.exp(-dt / 0.15));
+    const walkW = this.stepW * (1 - deathW);
+    this.phase = (this.phase + (stepSpeed * dt) / ENEMY.walkStride) % 1;
     this.idleT += dt;
     a.Walk.setEffectiveWeight(walkW);
     a.Walk.time = this.phase * a.Walk.getClip().duration;
@@ -447,6 +523,7 @@ export class Enemy {
     a.Death.setEffectiveWeight(deathW);
     a.Death.time = dead ? Math.min(this.deathT, a.Death.getClip().duration - 1e-3) : 0;
     this.mixer.update(0);
+    for (const [b, q] of this.restQ) q.copy(b.quaternion);
     this.root.updateMatrixWorld(true);
 
     // 사망: 회색으로, 눈 불빛을 끈다
@@ -459,10 +536,11 @@ export class Enemy {
     const armW = dead ? 1 - deathW : 1;
     if (armW <= 0) return;
 
-    // 머리/척추 두리번(전투 중에는 몸이 돌아가므로 머리를 가운데로)
-    const yawHead = this.headYaw * armW;
-    rotateBoneWorld(this.bones.Spine, UP, yawHead * 0.35);
-    rotateBoneWorld(this.bones.Head, UP, yawHead * 0.65);
+    // 상체 비틀림(최대 45°)과 고개(몸 정면 기준 최대 60°, 상체가 돈 만큼은 빼고 목이 나머지를 돈다)
+    const twist = THREE.MathUtils.clamp(this.twist + this.headYaw * 0.15, -ENEMY.twistMax, ENEMY.twistMax) * armW;
+    const neck = THREE.MathUtils.clamp(this.headYaw * armW - twist, -ENEMY.headMax, ENEMY.headMax);
+    rotateBoneWorld(this.bones.Spine, UP, twist);
+    rotateBoneWorld(this.bones.Head, UP, neck);
     // 맞으면 상체가 뒤로 움찔
     if (this.flinch > 0) {
       const right = _v.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));

@@ -6,7 +6,8 @@ function flashTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d')!;
-  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  // translate 뒤에 칠하므로 그라데이션도 원점 기준
+  const grd = g.createRadialGradient(0, 0, 0, 0, 0, 64);
   grd.addColorStop(0, 'rgba(255,255,230,1)');
   grd.addColorStop(0.25, 'rgba(255,210,120,0.95)');
   grd.addColorStop(0.6, 'rgba(255,140,40,0.35)');
