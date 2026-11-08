@@ -27,7 +27,7 @@ function bakedMaterial(src: THREE.MeshStandardMaterial) {
   return m;
 }
 
-const REACH_CELL = 0.25;
+const REACH_CELL = 0.125;
 
 export interface MapColliders {
   scale: number;

@@ -137,9 +137,8 @@ export const ENEMY = {
   /** 작아진 다리에 맞춘 순찰 속도(원래 키에서는 1.2) */
   patrolSpeed: 0.8,
   patrolRadius: 6,
-  /** 배치: 플레이어와, 적끼리 최소 거리 */
+  /** 배치: 플레이어와의 최소 거리(적끼리는 enemies.ts에서 서로 가장 먼 자리부터 골라 퍼뜨린다) */
   spawnFromPlayer: 12,
-  spawnApart: 5,
   /** 서서 두리번거리는 시간 범위(초) */
   lookTime: [4.5, 7] as [number, number],
   /** 걷다가 방향을 바꿀 때 몸 회전 속도 */
@@ -239,12 +238,12 @@ export const MAPS: MapDef[] = [
   {
     id: 'arena', name: '컨테이너 기지', desc: '좁은 통로와 2층 발판이 얽힌 근접전 맵', size: '23 × 45m',
     thumb: 'images/map_arena.webp', glb: 'models/map.glb', colliders: 'models/map_colliders.json',
-    enemies: [3, 2], fog: [45, 110],
+    enemies: [6, 4], fog: [45, 110],
   },
   {
     id: 'backrooms', name: '백룸', desc: '끝없이 이어지는 노란 사무실 방과 아치 통로', size: '75 × 20m',
     thumb: 'images/map_backrooms.webp', glb: 'models/map_backrooms.glb', colliders: 'models/map_backrooms_colliders.json',
-    enemies: [4, 3], fog: [10, 42], spawn: { x: 4, z: 5.2, yaw: 90 },
+    enemies: [12, 8], fog: [10, 42], spawn: { x: 4, z: 5.2, yaw: 90 },
     indoor: { color: 0x8c8250, hemiSky: 0xfff0b8, hemiGround: 0x8a7440, hemi: 2.2 },
   },
   {
