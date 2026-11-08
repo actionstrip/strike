@@ -2,7 +2,7 @@
 맵 빌드: 원본 glb -> scratch_build/*_raw.glb(시각용) + public/models/*_colliders.json(충돌 박스)
 
 Blender에서 실행:  exec(open(r'C:/inetpub/wwwroot/test/shooting/tools/blender/map_build.py', encoding='utf-8').read())
-그다음 build(MAP_ARENA) 또는 build(MAP_YARD). 단계별로 쓸 수 있게 함수로 나눴다.
+그다음 build(MAP_ARENA) 또는 build(MAP_BACKROOMS). 단계별로 쓸 수 있게 함수로 나눴다.
 
 - 가져온 뒤 모든 변환을 적용하고 SCALE배 한다(맵마다 캐릭터 1.8m 기준으로 맞춘 값).
 - 작은데 삼각형이 많은 소품은 Decimate.
@@ -28,19 +28,6 @@ MAP_ARENA = {
     # 판자를 엮은 상자 30개만 해당되는데, 면이 모두 실제 판자라 Decimate하면 가시처럼 깨진다. 그래서 끈다(전체 58.7k).
     'decimate_min_tris': 100000, 'decimate_target_tris': 220, 'decimate_max_size': 1.6, 'decimate_min_ratio': 0.08, 'decimate_skip': None,
     'cell': 0.125, 'hq': 0.05, 'prop_max_size': 1.6, 'min_top': 0.0,
-}
-MAP_YARD = {
-    # ResoForge 저폴리 맵 에셋(야적장): ×0.55면 차 5m, 콘크리트 방벽 0.9m, 상자 1.0m, 큰 컨테이너 2.4m, 외곽 방벽 6m
-    'src': '3d/map3.glb', 'out_glb': 'scratch_build/map_yard_raw.glb', 'out_json': 'public/models/map_yard_colliders.json',
-    'scale': 0.55,
-    # 원기둥 748개(개당 127), 모래주머니/타이어 더미(최대 3.9k), 차(1.6k) 같은 소품이 삼각형 대부분(42.7만).
-    # 물체마다 따로 줄인다(합친 뒤 줄이면 상자 모서리가 무너진다). 최소 비율 0.25로 실루엣을 지킨다.
-    'decimate_min_tris': 100, 'decimate_target_tris': 40, 'decimate_max_size': 6.0, 'decimate_min_ratio': 0.25,
-    # 차는 곡면이 많아 많이 줄이면 틈이 생긴다: 고정 비율
-    'decimate_skip': None, 'decimate_fixed': [(r'^CAR', 0.55)],
-    # 넓고 곡면/비스듬한 물체가 많아 0.125m 격자면 박스가 수만 개가 된다. 격자와 높이 단위를 키우고,
-    # 3m 이하 물체(타이어 더미, 통, 상자, 방벽)는 외곽 박스 하나로, 0.25m보다 낮은 구간(팔레트 등)은 넘어가게 둔다.
-    'cell': 0.25, 'hq': 0.2, 'prop_max_size': 3.0, 'min_top': 0.25,
 }
 MAP_BACKROOMS = {
     # Backrooms VR(VTX): 이미 m 단위(천장 2.6m, 문 2.2m)라 ×1.0. 바닥이 -0.12라 0으로 올린다.

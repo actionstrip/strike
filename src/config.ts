@@ -242,11 +242,6 @@ export const MAPS: MapDef[] = [
     enemies: [3, 2], fog: [45, 110],
   },
   {
-    id: 'yard', name: '야적장', desc: '차, 컨테이너, 방벽이 흩어진 넓은 야외 맵', size: '54 × 110m',
-    thumb: 'images/map_yard.webp', glb: 'models/map_yard.glb', colliders: 'models/map_yard_colliders.json',
-    enemies: [6, 4], fog: [60, 170], area: [-27, -55.2, 27, 54.9],
-  },
-  {
     id: 'backrooms', name: '백룸', desc: '끝없이 이어지는 노란 사무실 방과 아치 통로', size: '75 × 20m',
     thumb: 'images/map_backrooms.webp', glb: 'models/map_backrooms.glb', colliders: 'models/map_backrooms_colliders.json',
     enemies: [4, 3], fog: [10, 42], spawn: { x: 4, z: 5.2, yaw: 90 },
