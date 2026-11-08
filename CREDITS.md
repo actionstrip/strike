@@ -9,6 +9,7 @@
 | LOWPOLY \| FPS \| TDM \| GAME \| MAP by ResoForge (`public/models/map.glb`) | Space_One | CC BY 4.0 | https://sketchfab.com/3d-models/lowpoly-fps-tdm-game-map-by-resoforge-d41a19f699ea421a9aa32b407cb7537b | ×2.75 스케일, 변환 적용, 같은 재질끼리 병합(draw call 10), 충돌 박스 생성(`map_colliders.json`), meshopt 압축 |
 | Walking robot (`public/models/enemy2_robot.glb`) | komov | CC BY 4.0 | https://sketchfab.com/3d-models/walking-robot-bcc389f59ac747eeb7bf377c21b24d78 | spec-gloss 재질을 metal-rough로 변환, 텍스처 WebP 1024, meshopt 압축(3.9MB→664KB), 걷기 한 주기(116~148프레임)만 사용 |
 | LOWPOLY \| MAP \| ASSET \| by ResoForge (`public/models/map_yard.glb`) | ResoForge | CC BY 4.0 | https://sketchfab.com/3d-models/lowpoly-map-asset-by-resoforge-e766d489a6c349c8a8ec9a994b1f87b1 | ×0.55 스케일, 변환 적용, 소품별 Decimate(42.7만→15.5만 삼각형), 같은 재질끼리 병합, 충돌 박스 생성(`map_yard_colliders.json`), meshopt 압축(32MB→1.6MB), 맵 썸네일 렌더 |
+| Backrooms VR (`public/models/map_backrooms.glb`) | VTX | CC BY 4.0 | https://sketchfab.com/3d-models/backrooms-vr-1a5c397f0a43408fa38b09ea5c041149 | 바닥 높이 0으로 이동, 문/의자/감지기 Decimate(7만→4만 삼각형), 같은 재질끼리 병합, 텍스처 WebP(20MB→1.5MB), 충돌 박스 생성(`map_backrooms_colliders.json`), 맵 썸네일 렌더 |
 | 인트로 배경 (`public/images/intro_bg.webp`) | 사용자 제공 | — | `images/background.png` | WebP 변환(2.8MB→240KB) |
 
 > 주의: Tracer's Gun은 오버워치(Blizzard) 캐릭터 무기의 팬아트입니다. 모델 라이선스는 CC BY지만 디자인은 Blizzard IP이므로 상업화 전에 교체해야 합니다.

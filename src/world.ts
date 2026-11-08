@@ -14,6 +14,21 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
  * - test: 바닥, 엄폐 박스, 표적판이 있는 시험 맵(오르기, 앉기 통로 확인용)
  */
 
+/** 조명이 구워진 텍스처를 그대로 보여 주는 재질(조명, 톤 매핑 없음). 텍스처 없는 발광 재질은 발광색으로. */
+function bakedMaterial(src: THREE.MeshStandardMaterial) {
+  const map = src.map ?? src.emissiveMap;
+  const color = src.map ? src.color.clone() : src.emissiveMap || src.emissiveIntensity > 0 && src.emissive.getHex() ? src.emissive.clone() : src.color.clone();
+  const m = new THREE.MeshBasicMaterial({
+    map, color, transparent: src.transparent, opacity: src.opacity, alphaTest: src.alphaTest, side: src.side, depthWrite: src.depthWrite,
+  });
+  m.toneMapped = false;
+  m.name = src.name;
+  src.dispose();
+  return m;
+}
+
+const REACH_CELL = 0.25;
+
 export interface MapColliders {
   scale: number;
   bounds: number[];
@@ -65,14 +80,25 @@ export class World {
   /** 실제 맵: 시각 메시는 그대로 그리고 레이캐스트 대상으로 쓰며, 이동 충돌은 미리 만든 박스를 쓴다 */
   buildArena(gltf: GLTF, col: MapColliders) {
     const s = this.scene;
-    s.background = new THREE.Color(0xa9c3dc);
-    s.fog = new THREE.Fog(0xa9c3dc, this.def.fog[0], this.def.fog[1]);
+    const indoor = this.def.indoor;
+    const sky = indoor ? indoor.color : 0xa9c3dc;
+    s.background = new THREE.Color(sky);
+    s.fog = new THREE.Fog(sky, this.def.fog[0], this.def.fog[1]);
+    if (indoor) {
+      // 천장이 해를 가린다: 그림자 없이 약한 해 + 따뜻한 반구광으로 캐릭터를 비춘다
+      this.sun.castShadow = false;
+      this.sun.intensity = 0.6;
+      this.hemi.color.set(indoor.hemiSky);
+      this.hemi.groundColor.set(indoor.hemiGround);
+      this.hemi.intensity = indoor.hemi;
+    }
     const map = gltf.scene;
     map.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
-      m.castShadow = true;
-      m.receiveShadow = true;
+      if (indoor) m.material = bakedMaterial(m.material as THREE.MeshStandardMaterial);
+      m.castShadow = !indoor;
+      m.receiveShadow = !indoor;
       m.geometry.computeBoundsTree();
       this.hitMeshes.push(m);
     });
@@ -104,6 +130,45 @@ export class World {
     const sp = this.def.spawn ?? { x: cx, z: z1 - 6, yaw: 0 };
     this.spawn.pos.copy(this.findFree(new THREE.Vector3(sp.x, 0, sp.z)));
     this.spawn.yaw = sp.yaw;
+    this.computeReach(this.spawn.pos);
+  }
+
+  /** 플레이어 시작점에서 걸어서 갈 수 있는 칸(REACH_CELL 격자). 적 배치가 건물 밖이나 막힌 방에 놓이지 않게 한다. */
+  private reach: { grid: Uint8Array; w: number; h: number } | null = null;
+
+  private computeReach(from: THREE.Vector3, r = 0.3) {
+    const b = this.bounds, c = REACH_CELL;
+    const w = Math.ceil((b.max.x - b.min.x) / c), h = Math.ceil((b.max.z - b.min.z) / c);
+    const blocked = new Uint8Array(w * h);
+    for (const k of this.colliders) {
+      // 몸통 높이(무릎~머리)를 막는 박스만. 낮은 턱은 오르고, 머리 위는 지나간다.
+      if (k.min.y > 1.7 || k.max.y < 0.35) continue;
+      const i0 = Math.max(0, Math.floor((k.min.x - r - b.min.x) / c)), i1 = Math.min(w - 1, Math.floor((k.max.x + r - b.min.x) / c));
+      const j0 = Math.max(0, Math.floor((k.min.z - r - b.min.z) / c)), j1 = Math.min(h - 1, Math.floor((k.max.z + r - b.min.z) / c));
+      for (let j = j0; j <= j1; j++) blocked.fill(1, j * w + i0, j * w + i1 + 1);
+    }
+    const grid = new Uint8Array(w * h);
+    const si = Math.floor((from.x - b.min.x) / c), sj = Math.floor((from.z - b.min.z) / c);
+    if (si < 0 || sj < 0 || si >= w || sj >= h) return;
+    const stack = [sj * w + si];
+    grid[stack[0]] = 1;
+    while (stack.length) {
+      const p = stack.pop()!;
+      const i = p % w, j = (p - i) / w;
+      if (i > 0 && !grid[p - 1] && !blocked[p - 1]) { grid[p - 1] = 1; stack.push(p - 1); }
+      if (i < w - 1 && !grid[p + 1] && !blocked[p + 1]) { grid[p + 1] = 1; stack.push(p + 1); }
+      if (j > 0 && !grid[p - w] && !blocked[p - w]) { grid[p - w] = 1; stack.push(p - w); }
+      if (j < h - 1 && !grid[p + w] && !blocked[p + w]) { grid[p + w] = 1; stack.push(p + w); }
+    }
+    this.reach = { grid, w, h };
+  }
+
+  /** (x, z)에 플레이어 시작점에서 걸어서 갈 수 있는가(시험 맵처럼 계산하지 않았으면 항상 true) */
+  reachable(x: number, z: number) {
+    if (!this.reach) return true;
+    const i = Math.floor((x - this.bounds.min.x) / REACH_CELL), j = Math.floor((z - this.bounds.min.z) / REACH_CELL);
+    if (i < 0 || j < 0 || i >= this.reach.w || j >= this.reach.h) return false;
+    return this.reach.grid[j * this.reach.w + i] === 1;
   }
 
   /** 바닥 높이에서 반경 r 원기둥(키 2m)이 들어갈 빈 자리를 near 가까이에서 찾는다 */

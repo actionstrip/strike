@@ -76,7 +76,7 @@ const tpFlash = new MuzzleFlash(character.gun.muzzle, effects.flashTex, 0.3, BOD
 
 // 적
 const enemies = new Enemies(assets, world.scene, effects.flashTex);
-enemies.spawn(world.colliders, player.pos, world.bounds, 7, mapDef.enemies);
+enemies.spawn(world.colliders, player.pos, world.bounds, 7, mapDef.enemies, (x, z) => world.reachable(x, z));
 const playerHead = new THREE.Vector3();
 const _pbox = new THREE.Box3();
 const _eray = new THREE.Raycaster();
@@ -317,7 +317,7 @@ const debug = {
   },
   enemies,
   /** 적 다시 배치(시드, [총잡이 수, 레이저 로봇 수]) */
-  spawnEnemies(seed = 7, counts: [number, number] = mapDef.enemies) { enemies.spawn(world.colliders, player.pos, world.bounds, seed, counts); },
+  spawnEnemies(seed = 7, counts: [number, number] = mapDef.enemies) { enemies.spawn(world.colliders, player.pos, world.bounds, seed, counts, (x, z) => world.reachable(x, z)); },
   /** 맵 정보: 경계, 스폰, 충돌 박스 수 */
   map() { return { mode: world.def.id, bounds: [world.bounds.min.toArray(), world.bounds.max.toArray()], spawn: world.spawn.pos.toArray(), colliders: world.colliders.length, hitMeshes: world.hitMeshes.length }; },
   /** 스폰 지점으로 */

@@ -229,6 +229,11 @@ export interface MapDef {
   spawn?: { x: number; z: number; yaw: number };
   /** 싸우는 범위 [x0, z0, x1, z1](외곽 벽 안쪽). 없으면 충돌 박스 전체 범위. 적 배치와 순찰에 쓴다. */
   area?: [number, number, number, number];
+  /**
+   * 실내 맵: 맵 텍스처에 조명이 구워져 있다. 맵은 조명 없이(unlit) 그대로 그리고,
+   * 천장이 해를 가리므로 그림자를 끄고 반구광으로 캐릭터를 밝힌다. 값은 안개/배경 색.
+   */
+  indoor?: { color: number; hemiSky: number; hemiGround: number; hemi: number };
 }
 export const MAPS: MapDef[] = [
   {
@@ -240,6 +245,12 @@ export const MAPS: MapDef[] = [
     id: 'yard', name: '야적장', desc: '차, 컨테이너, 방벽이 흩어진 넓은 야외 맵', size: '54 × 110m',
     thumb: 'images/map_yard.webp', glb: 'models/map_yard.glb', colliders: 'models/map_yard_colliders.json',
     enemies: [6, 4], fog: [60, 170], area: [-27, -55.2, 27, 54.9],
+  },
+  {
+    id: 'backrooms', name: '백룸', desc: '끝없이 이어지는 노란 사무실 방과 아치 통로', size: '75 × 20m',
+    thumb: 'images/map_backrooms.webp', glb: 'models/map_backrooms.glb', colliders: 'models/map_backrooms_colliders.json',
+    enemies: [4, 3], fog: [10, 42], spawn: { x: 4, z: 5.2, yaw: 90 },
+    indoor: { color: 0x8c8250, hemiSky: 0xfff0b8, hemiGround: 0x8a7440, hemi: 2.2 },
   },
   {
     id: 'test', name: '시험장', desc: '엄폐 상자와 표적판이 있는 연습 맵', size: '86 × 86m',

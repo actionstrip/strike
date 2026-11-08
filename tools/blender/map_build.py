@@ -42,8 +42,25 @@ MAP_YARD = {
     # 3m 이하 물체(타이어 더미, 통, 상자, 방벽)는 외곽 박스 하나로, 0.25m보다 낮은 구간(팔레트 등)은 넘어가게 둔다.
     'cell': 0.25, 'hq': 0.2, 'prop_max_size': 3.0, 'min_top': 0.25,
 }
+MAP_BACKROOMS = {
+    # Backrooms VR(VTX): 이미 m 단위(천장 2.6m, 문 2.2m)라 ×1.0. 바닥이 -0.12라 0으로 올린다.
+    'src': '3d/backrooms_vr.glb', 'out_glb': 'scratch_build/map_backrooms_raw.glb', 'out_json': 'public/models/map_backrooms_colliders.json',
+    'scale': 1.0, 'offset_y': 0.12, 'texcoords': True,
+    # 메시가 재질별로 맵 전체에 걸쳐 합쳐져 있어 크기 기준이 안 맞는다: 재질 이름으로 고밀도 소품만 줄인다
+    'decimate_min_tris': 10 ** 9, 'decimate_target_tris': 0, 'decimate_max_size': 0, 'decimate_min_ratio': 1.0,
+    'decimate_material': {'Exit_Door': 0.4, 'ArmChair_1': 0.4, 'Sensor': 0.35, 'Socket_1': 0.4, 'Furniture_1': 0.6},
+    # 벽, 천장이 두께 없는 면이라 수평 레이 방식(planar_columns)으로 충돌을 만든다
+    'planar': True,
+    'cell': 0.125, 'hq': 0.05, 'prop_max_size': 1.6, 'min_top': 0.0,
+}
 
 SRC = OUT_GLB = OUT_JSON = ''
+OFFSET_Y = 0.0
+TEXCOORDS = False
+DECIMATE_MATERIAL = {}
+PLANAR = False
+PLANAR_DZ = 0.1
+PLANAR_CEIL_FROM = 2.0
 SCALE = 1.0
 DECIMATE_MIN_TRIS = 100000
 DECIMATE_TARGET_TRIS = 220
@@ -125,7 +142,7 @@ def import_map():
             o.data = o.data.copy()
     # 변환을 정점에 굽는다(연산자 대신 데이터로: 선택 상태와 무관하게)
     from mathutils import Matrix
-    S = Matrix.Scale(SCALE, 4)
+    S = Matrix.Translation((0, 0, OFFSET_Y)) @ Matrix.Scale(SCALE, 4)
     for o in meshes:
         o.data.transform(S @ o.matrix_world)
         if o.matrix_world.determinant() < 0:
@@ -141,6 +158,15 @@ def decimate_props(meshes):
     n = 0
     for o in meshes:
         t = tri_count(o)
+        mat = o.data.materials[0].name if o.data.materials and o.data.materials[0] else ''
+        if mat in DECIMATE_MATERIAL:
+            m = o.modifiers.new('dec', 'DECIMATE')
+            m.ratio = DECIMATE_MATERIAL[mat]
+            m.use_collapse_triangulate = True
+            with bpy.context.temp_override(object=o, active_object=o, selected_objects=[o]):
+                bpy.ops.object.modifier_apply(modifier=m.name)
+            n += 1
+            continue
         if t < DECIMATE_MIN_TRIS or max(o.dimensions) > DECIMATE_MAX_SIZE:
             continue
         name = o.get('src_name', '')
@@ -232,7 +258,11 @@ def column_intervals(meshes):
                         enter = None
                         floor_z = hit.z
                     origin = hit + Vector((0, 0, 1e-4))
-    # 기둥마다 겹치는 구간을 합치고 높이를 1cm로 맞춘다
+    return merge_columns(cols), lo
+
+
+def merge_columns(cols):
+    """기둥마다 겹치는 구간을 합치고 높이를 HQ 단위로 맞춘다"""
     out = {}
     for k, iv in cols.items():
         iv.sort()
@@ -245,7 +275,42 @@ def column_intervals(meshes):
             else:
                 merged.append([a, b])
         out[k] = [tuple(m) for m in merged]
-    return out, lo
+    return out
+
+
+def planar_columns(meshes):
+    """벽과 천장이 두께 없는 면인 맵(실내 에셋에 흔함)용.
+    칸마다 높이 PLANAR_DZ 간격으로 칸을 가로지르는 짧은 수평 레이(x, y 두 방향)를 쏴서 면이 지나가면 막힌 것으로 본다.
+    천장은 머리 위(PLANAR_CEIL_FROM)에서 위로 쏜 레이가 처음 만나는 면을 얇은 판으로 만든다(점프 시 머리가 막힌다)."""
+    verts, polys = [], []
+    for o in meshes:
+        base = len(verts)
+        verts.extend(o.matrix_world @ v.co for v in o.data.vertices)
+        polys.extend([base + i for i in p.vertices] for p in o.data.polygons)
+    bvh = BVHTree.FromPolygons(verts, polys)
+    lo = Vector((min(v.x for v in verts), min(v.y for v in verts), 0))
+    hi = Vector((max(v.x for v in verts), max(v.y for v in verts), 0))
+    top = max(v.z for v in verts)
+    ni = math.ceil((hi.x - lo.x) / CELL)
+    nj = math.ceil((hi.y - lo.y) / CELL)
+    levels = [PLANAR_DZ * (k + 0.5) for k in range(int(PLANAR_CEIL_FROM / PLANAR_DZ) + 1)]
+    ex, ey = Vector((1, 0, 0)), Vector((0, 1, 0))
+    cols = {}
+    for i in range(ni):
+        x = lo.x + (i + 0.5) * CELL
+        for j in range(nj):
+            y = lo.y + (j + 0.5) * CELL
+            iv = []
+            for z in levels:
+                if (bvh.ray_cast(Vector((x - CELL / 2, y, z)), ex, CELL)[0] is not None or
+                        bvh.ray_cast(Vector((x, y - CELL / 2, z)), ey, CELL)[0] is not None):
+                    iv.append((max(0.0, z - PLANAR_DZ / 2), z + PLANAR_DZ / 2))
+            hit = bvh.ray_cast(Vector((x, y, PLANAR_CEIL_FROM)), Vector((0, 0, 1)), top)[0]
+            if hit is not None:
+                iv.append((hit.z, hit.z + 0.1))
+            if iv:
+                cols[(i, j)] = iv
+    return merge_columns(cols), lo
 
 
 def greedy_boxes(cols, lo):
@@ -328,11 +393,11 @@ def merge_by_material(meshes):
 def export():
     bpy.ops.export_scene.gltf(filepath=OUT_GLB, export_format='GLB', use_selection=False, export_yup=True,
                               export_apply=True, export_materials='EXPORT', export_normals=True,
-                              export_texcoords=False, export_animations=False)
+                              export_texcoords=TEXCOORDS, export_animations=False)
 
 
 def configure(cfg):
-    global SRC, OUT_GLB, OUT_JSON, SCALE, DECIMATE_MIN_TRIS, DECIMATE_TARGET_TRIS, DECIMATE_MAX_SIZE, DECIMATE_MIN_RATIO, DECIMATE_SKIP, DECIMATE_FIXED, CELL, HQ, PROP_MAX_SIZE, MIN_TOP
+    global SRC, OUT_GLB, OUT_JSON, SCALE, DECIMATE_MIN_TRIS, DECIMATE_TARGET_TRIS, DECIMATE_MAX_SIZE, DECIMATE_MIN_RATIO, DECIMATE_SKIP, DECIMATE_FIXED, CELL, HQ, PROP_MAX_SIZE, MIN_TOP, OFFSET_Y, TEXCOORDS, DECIMATE_MATERIAL, PLANAR
     SRC = ROOT + '/' + cfg['src']
     OUT_GLB = ROOT + '/' + cfg['out_glb']
     OUT_JSON = ROOT + '/' + cfg['out_json']
@@ -347,14 +412,22 @@ def configure(cfg):
     HQ = cfg['hq']
     PROP_MAX_SIZE = cfg['prop_max_size']
     MIN_TOP = cfg['min_top']
+    OFFSET_Y = cfg.get('offset_y', 0.0)
+    TEXCOORDS = cfg.get('texcoords', False)
+    DECIMATE_MATERIAL = cfg.get('decimate_material', {})
+    PLANAR = cfg.get('planar', False)
 
 
 def build(cfg=MAP_ARENA):
     configure(cfg)
     meshes = import_map()
     info = decimate_props(meshes)
-    cols, lo = column_intervals(meshes)
-    boxes = greedy_boxes(cols, lo) + prop_boxes(meshes)
+    if PLANAR:
+        cols, lo = planar_columns(meshes)
+        boxes = greedy_boxes(cols, lo)
+    else:
+        cols, lo = column_intervals(meshes)
+        boxes = greedy_boxes(cols, lo) + prop_boxes(meshes)
     info['boxes'] = write_colliders(boxes, meshes)
     info['columns'] = len(cols)
     info['materials'] = merge_by_material(meshes)

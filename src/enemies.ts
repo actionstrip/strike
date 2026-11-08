@@ -15,9 +15,12 @@ export class Enemies {
 
   /**
    * 맵 바닥의 빈 칸에 배치한다. 종류는 번갈아(총잡이, 레이저, 총잡이, ...) 각 종류 수만큼.
-   * counts를 주면 [총잡이 수, 레이저 수]로 덮어쓴다.
+   * counts를 주면 [총잡이 수, 레이저 수]로 덮어쓴다. reachable이 false인 곳(건물 밖, 막힌 방)에는 놓지 않는다.
    */
-  spawn(colliders: THREE.Box3[], playerPos: THREE.Vector3, area: THREE.Box3, seed = 7, counts: [number, number] = [ENEMY.count, ENEMY2.count]) {
+  spawn(
+    colliders: THREE.Box3[], playerPos: THREE.Vector3, area: THREE.Box3, seed = 7, counts: [number, number] = [ENEMY.count, ENEMY2.count],
+    reachable: (x: number, z: number) => boolean = () => true,
+  ) {
     for (const e of this.list) e.root.removeFromParent();
     this.list = [];
     AREA.copy(area);
@@ -39,7 +42,7 @@ export class Enemies {
       const cfg = kind === 'gunner' ? ENEMY : ENEMY2;
       const x = area.min.x + 1 + rand() * (wd - 2);
       const z = area.min.z + 1 + rand() * (d - 2);
-      if (blocked(x, z, cfg.height)) continue;
+      if (blocked(x, z, cfg.height) || !reachable(x, z)) continue;
       if (Math.hypot(x - playerPos.x, z - playerPos.z) < cfg.spawnFromPlayer) continue;
       if (this.list.some((e) => Math.hypot(e.root.position.x - x, e.root.position.z - z) < cfg.spawnApart)) continue;
       const r = mulberry32(seed * 977 + this.list.length * 131);

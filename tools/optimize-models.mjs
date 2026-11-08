@@ -56,4 +56,6 @@ await run('scratch_build/map_raw.glb', 'public/models/map.glb', { merge: true })
 // 넓은 맵(15.5만 삼각형): 정점을 더 강하게 양자화(high)해 용량을 줄인다
 await run('scratch_build/map_yard_raw.glb', 'public/models/map_yard.glb', { merge: true, level: 'high' });
 // 두 번째 적(레이저 보행 로봇): Sketchfab 원본을 그대로(애니메이션은 런타임에 걷기 한 주기만 잘라 쓴다)
+// 백룸: 조명이 구워진 텍스처 맵(1024 WebP)
+await run('scratch_build/map_backrooms_raw.glb', 'public/models/map_backrooms.glb', { merge: true });
 await run('3d/enermy2_robot.glb', 'public/models/enemy2_robot.glb', { specGloss: true });
