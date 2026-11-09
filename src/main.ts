@@ -18,12 +18,21 @@ import { World } from './world';
 import { Pickups } from './pickups';
 import { NukeCrates } from './nukes';
 import { Portal } from './portal';
+import { TouchControls } from './touch';
 import { renderIcon } from './icon';
 import { backToIntro, chooseMap } from './intro';
 
+// 모바일: 손가락이 주 입력인 기기, 또는 ?mobile=1(PC에서 마우스로 시험). ?mobile=0이면 끈다.
+const params = new URLSearchParams(location.search);
+const isMobile = params.has('mobile') ? params.get('mobile') !== '0' : matchMedia('(pointer: coarse)').matches;
+document.body.classList.toggle('mobile', isMobile);
+document.body.classList.toggle('stats', params.has('stats'));
+World.lowPower = isMobile;
+
 const app = document.getElementById('app')!;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// 모바일은 화면이 작고 GPU가 약해 픽셀 비율 상한을 낮춘다
+renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -33,6 +42,7 @@ renderer.autoClear = false;
 app.appendChild(renderer.domElement);
 
 const input = new Input(renderer.domElement);
+const touch = isMobile ? new TouchControls(input) : null;
 const sfx = new Sfx();
 const hud = new Hud();
 // 인트로에서 맵을 고른다(?map=이 있으면 바로)
@@ -210,18 +220,43 @@ const enemyHooks: EnemyHooks = {
 };
 
 let started = false;
+/** 모바일 일시정지(시작 화면을 다시 띄운 동안, 또는 세로로 든 동안) */
+let paused = false;
+const portraitMq = matchMedia('(orientation: portrait)');
+
+/** 게임 시작/재개(PC는 Pointer Lock이 잡힐 때, 모바일은 시작 화면을 탭할 때) */
+function startGame() {
+  // 처음 시작할 때: 포털에서 방금 나온 것처럼 번쩍인다
+  if (!started) { portal.flash(); sfx.portalWhoosh(); }
+  started = true;
+  paused = false;
+  startEl.classList.add('hidden');
+  touch?.show(!cleared);
+}
+
+/** 시작 화면을 다시 띄운다(PC: 마우스 잠금이 풀림, 모바일: 일시정지 버튼) */
+function showStartPanel() {
+  // 클리어 뒤에는 시작 화면 대신 결과 화면을 둔다
+  if (cleared) return;
+  startEl.classList.remove('hidden');
+  if (isMobile) { paused = true; touch?.show(false); }
+}
+
 startEl.addEventListener('click', () => {
   sfx.unlock();
-  input.requestLock();
+  if (!isMobile) { input.requestLock(); return; }
+  // 모바일: 전체 화면과 가로 고정을 시도한다(지원하는 브라우저에서만, 실패해도 그대로 진행)
+  document.documentElement.requestFullscreen?.().then(() => {
+    (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {});
+  }).catch(() => {});
+  startGame();
 });
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === renderer.domElement;
-  // 처음 시작할 때: 포털에서 방금 나온 것처럼 번쩍인다
-  if (locked && !started) { portal.flash(); sfx.portalWhoosh(); }
-  started = locked || started;
-  // 클리어 뒤에는 시작 화면 대신 결과 화면을 둔다
-  startEl.classList.toggle('hidden', locked || cleared);
+  if (locked) startGame();
+  else showStartPanel();
 });
+if (touch) touch.onPause = showStartPanel;
 
 function setView(v: View) {
   camRig.view = v;
@@ -298,6 +333,8 @@ function shoot() {
 function frame() {
   requestAnimationFrame(frame);
   const rawDt = Math.min(clock.getDelta(), 0.05);
+  // 모바일 일시정지 중, 또는 세로로 든 동안(회전 안내가 화면을 덮는다)에는 시뮬레이션을 멈춘다
+  if (paused || (isMobile && portraitMq.matches)) { input.endFrame(); return; }
   step(rawDt * timeScale, rawDt);
 }
 
@@ -402,6 +439,12 @@ function step(dt: number, rawDt: number) {
   }
 
   hud.update(dt, weapon, weapon.spread(player), cam.fov, camRig.view, player.sprinting, player.yaw);
+  if (touch) {
+    // 쓰러졌거나 클리어했으면 터치 버튼을 숨긴다
+    const showTouch = started && !paused && !cleared && deadT <= 0;
+    if (showTouch !== touch.root.classList.contains('on')) touch.show(showTouch);
+    touch.update(weapon, player, camRig.view);
+  }
   minimap.update(player.pos, player.yaw, pickups.items, nukes.markers(), portal.marker());
   fpsAcc += rawDt; fpsFrames++;
   if (fpsAcc > 0.5) { fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
@@ -415,7 +458,9 @@ requestAnimationFrame(frame);
 /** 검증용 디버그 훅 */
 const debug = {
   player, world, weapon,
-  start() { if (!started) portal.flash(); started = true; startEl.classList.add('hidden'); sfx.unlock(); },
+  start() { startGame(); sfx.unlock(); },
+  /** 모바일 일시정지 상태 */
+  paused() { return paused || (isMobile && portraitMq.matches); },
   setView(v: View) { setView(v); camRig.viewBlend = v === 'tp' ? 1 : 0; },
   /** x=오른쪽, z=앞 (-1..1). treadmill이면 제자리에서 애니메이션만 */
   setMove(x: number, z: number, sprint = false, treadmill = true) {

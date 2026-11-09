@@ -12,6 +12,10 @@ export class Input {
   virtualMove: { x: number; z: number; sprint: boolean } | null = null;
   /** 디버그용 가상 앉기. null이 아니면 키 대신 쓴다. */
   virtualCrouch: boolean | null = null;
+  /** 모바일 터치 조작(src/touch.ts)이 채운다: 이동 스틱(아날로그), 달리기, 앉기 토글 */
+  touchMove: { x: number; z: number } | null = null;
+  touchSprint = false;
+  touchCrouch = false;
 
   constructor(private el: HTMLElement) {
     window.addEventListener('keydown', (e) => {
@@ -49,6 +53,7 @@ export class Input {
   /** 로컬 이동 입력(x=오른쪽, z=앞) */
   moveAxis() {
     if (this.virtualMove) return { x: this.virtualMove.x, z: this.virtualMove.z };
+    if (this.touchMove) return { x: this.touchMove.x, z: this.touchMove.z };
     let x = 0, z = 0;
     if (this.keys.has('KeyW')) z += 1;
     if (this.keys.has('KeyS')) z -= 1;
@@ -59,12 +64,13 @@ export class Input {
   }
 
   sprintHeld() {
-    return this.virtualMove ? this.virtualMove.sprint : this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    if (this.virtualMove) return this.virtualMove.sprint;
+    return this.touchSprint || this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
   }
 
-  /** C를 누르고 있는 동안 앉는다 */
+  /** C를 누르고 있는 동안(모바일은 앉기 버튼이 켜져 있는 동안) 앉는다 */
   crouchHeld() {
-    return this.keys.has('KeyC');
+    return this.keys.has('KeyC') || this.touchCrouch;
   }
 
   endFrame() {

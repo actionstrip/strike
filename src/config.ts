@@ -307,6 +307,23 @@ export const PORTAL = {
   enterWidthMul: 0.85,
 };
 
+/** 모바일 터치 조작 */
+export const TOUCH = {
+  /** 이동 스틱: 반지름(px), 데드존(0..1), 앞으로 이만큼 밀면 달리기 */
+  stickRadius: 60,
+  deadZone: 0.15,
+  sprintAt: 0.9,
+  /** 이동 스틱을 놓을 수 있는 왼쪽 영역(화면 폭 비율) */
+  stickArea: 0.4,
+  /** 시선: 끈 1px당 마우스 몇 px로 칠지 */
+  lookSensitivity: 1.6,
+  /** 버튼 지름(px) */
+  fireSize: 84,
+  buttonSize: 58,
+  /** 탄창이 이만큼 이하면 재장전 버튼이 깜빡인다 */
+  reloadBlinkAt: 6,
+};
+
 /** 아이템 줍는 동작(짧게 숙였다 일어나고, 아이템은 몸쪽으로 날아와 사라진다) */
 export const PICKUP_ANIM = {
   /** 숙였다 일어나는 전체 시간(초) */

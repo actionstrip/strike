@@ -43,6 +43,8 @@ export interface Target {
 }
 
 export class World {
+  /** 모바일 등 저사양: 넓은 맵에서도 그림자 맵을 4096으로 올리지 않는다 */
+  static lowPower = false;
   scene = new THREE.Scene();
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
@@ -121,7 +123,7 @@ export class World {
     sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.far = reach * 2;
     sc.updateProjectionMatrix();
     // 넓은 맵은 그림자 해상도를 올린다(텍셀 약 3.5cm 이하 유지)
-    if (half > 40) {
+    if (half > 40 && !World.lowPower) {
       this.sun.shadow.mapSize.set(4096, 4096);
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null;

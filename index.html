@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Robot FPS Prototype</title>
   <link rel="stylesheet" href="/src/style.css" />
 </head>
@@ -35,6 +35,9 @@
     <div id="view-label">1인칭 [V]</div>
     <div id="stats"></div>
   </div>
+  <!-- 모바일 터치 조작(src/touch.ts가 채운다) -->
+  <div id="touch"></div>
+  <div id="rotate"><div class="phone"></div><b>가로로 돌려 주세요</b><small>이 게임은 가로 화면에서 플레이합니다</small></div>
   <div id="intro" class="hidden">
     <header>
       <h1>ROBOT FPS</h1>
@@ -46,8 +49,17 @@
     <div class="panel">
       <h1>ROBOT FPS 프로토타입</h1>
       <div id="map-name"></div>
-      <p>클릭해서 시작</p>
-      <table>
+      <p class="pc-only">클릭해서 시작</p>
+      <p class="touch-only">탭해서 시작</p>
+      <table class="touch-only">
+        <tr><td>왼쪽 화면</td><td>이동(끝까지 밀면 달리기)</td></tr>
+        <tr><td>오른쪽 화면</td><td>끌어서 시선</td></tr>
+        <tr><td>발사</td><td>누르는 동안 연사, 끌면 조준도</td></tr>
+        <tr><td>조준 · 앉기</td><td>탭해서 켜고 끄기</td></tr>
+        <tr><td>R · 점프 · 1P</td><td>재장전 · 점프 · 시점 전환</td></tr>
+        <tr><td>Ⅱ</td><td>일시정지(이 화면)</td></tr>
+      </table>
+      <table class="pc-only">
         <tr><td>WASD</td><td>이동</td></tr>
         <tr><td>Shift</td><td>달리기</td></tr>
         <tr><td>Space</td><td>점프</td></tr>
