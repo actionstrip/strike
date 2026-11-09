@@ -68,3 +68,29 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f12; fon
 /* 탄창 아이템을 주웠을 때 탄약 표시 위에 잠깐 */
 #pickup-toast { position: fixed; right: 24px; bottom: 74px; color: #ffc34d; font-weight: 700; font-size: 18px; text-shadow: 0 1px 4px rgba(0,0,0,.8); opacity: 0; transform: translateY(6px); transition: opacity .15s, transform .15s; pointer-events: none; }
 #pickup-toast.show { opacity: 1; transform: none; }
+
+/* 주인공 체력(에너지) */
+#health { position: absolute; left: 20px; bottom: 46px; display: flex; align-items: center; gap: 8px; text-shadow: 0 1px 3px #000; }
+#health .ico { position: relative; width: 16px; height: 16px; }
+#health .ico::before, #health .ico::after { content: ''; position: absolute; background: #fff; box-shadow: 0 0 2px rgba(0,0,0,.8); }
+#health .ico::before { left: 5px; top: 0; width: 6px; height: 16px; }
+#health .ico::after { left: 0; top: 5px; width: 16px; height: 6px; }
+#health .bar { position: relative; width: 220px; height: 12px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.3); border-radius: 3px; overflow: hidden; }
+#health .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; }
+#health .fill { background: var(--hp-color, #5ad46a); transition: width .12s, background-color .2s; }
+/* 깎인 만큼 잠시 남았다가 줄어드는 흰 띠 */
+#health .lag { background: rgba(255,255,255,.55); transition: width .5s .25s; }
+#health-num { font-weight: 700; font-size: 20px; min-width: 38px; font-variant-numeric: tabular-nums; }
+#health.low .ico::before, #health.low .ico::after { background: #ff4a3d; }
+#health.low #health-num { color: #ff6a4d; animation: hp-pulse .8s ease-in-out infinite; }
+#health.heal .bar { box-shadow: 0 0 10px 2px rgba(90,255,120,.8); }
+@keyframes hp-pulse { 50% { opacity: .45; } }
+#view-label { bottom: 18px; }
+@media (max-width: 600px) { #health .bar { width: 130px; } }
+
+#dead { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: radial-gradient(ellipse at center, rgba(60,0,0,.35), rgba(30,0,0,.8)); opacity: 0; transition: opacity .4s; }
+#dead.show { opacity: 1; }
+#dead b { font-size: 34px; letter-spacing: .08em; color: #ff5a4d; text-shadow: 0 2px 8px #000; }
+#dead small { font-size: 14px; color: #ddd; }
+#pickup-toast.heal { color: #6dff8a; }

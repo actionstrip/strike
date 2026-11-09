@@ -4,7 +4,7 @@ import { loadAssets } from './assets';
 import { Sfx } from './audio';
 import { CameraRig, type View } from './camera';
 import { BODY_LAYER, Character } from './character';
-import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MOVE, PICKUP, WEAPON } from './config';
+import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MEDKIT, MOVE, PICKUP, PLAYER_HEALTH, WEAPON } from './config';
 import { mulberry32, type Enemy, type EnemyHooks, type EnemyWeapon } from './enemy';
 import { Enemies } from './enemies';
 import { Effects, MuzzleFlash } from './effects';
@@ -81,15 +81,41 @@ enemies.spawn(world.colliders, player.pos, world.bounds, 7, mapDef.enemies, (x, 
 // 탄창 아이템
 const pickups = new Pickups(assets, world.scene);
 const spawnPickups = (seed = 11) =>
-  pickups.spawn(mapDef.pickups, { colliders: world.colliders, area: world.bounds, reachable: (x, z) => world.reachable(x, z), rand: mulberry32(seed), from: world.spawn.pos });
+  pickups.spawn({ ammo: mapDef.pickups, medkit: mapDef.medkits }, { colliders: world.colliders, area: world.bounds, reachable: (x, z) => world.reachable(x, z), rand: mulberry32(seed), from: world.spawn.pos });
 spawnPickups();
 const playerHead = new THREE.Vector3();
 const _pbox = new THREE.Box3();
 const _eray = new THREE.Raycaster();
 const _phit = new THREE.Vector3();
 let playerHits = 0;
+/** 주인공 체력(에너지) */
+let hp = PLAYER_HEALTH.max;
+/** 쓰러진 뒤 다시 일어나기까지 남은 시간(0 이하면 살아 있음) */
+let deadT = 0;
 /** 디버그: 적 총알이 플레이어를 맞히지 않게 한다 */
 let godMode = false;
+
+function die() {
+  deadT = PLAYER_HEALTH.respawnDelay;
+  weapon.forceAds = null;
+  hud.setDead(true);
+}
+
+/** 시작 지점에서 체력과 탄약을 채우고 다시 일어난다 */
+function respawn() {
+  deadT = 0;
+  hp = PLAYER_HEALTH.max;
+  player.mantle = null;
+  player.mantleHold = null;
+  player.pos.copy(world.spawn.pos);
+  player.vel.set(0, 0, 0);
+  player.yaw = world.spawn.yaw;
+  player.pitch = 0;
+  weapon.ammo = WEAPON.magSize;
+  weapon.reserve = Math.max(weapon.reserve, WEAPON.reserve);
+  weapon.reloadT = -1;
+  hud.setDead(false);
+}
 const enemyHooks: EnemyHooks = {
   onFire(_e: Enemy, from: THREE.Vector3, dir: THREE.Vector3, kind: EnemyWeapon) {
     _eray.set(from, dir);
@@ -110,11 +136,13 @@ const enemyHooks: EnemyHooks = {
       effects.tracer(from, end);
       sfx.enemyShot(from.distanceTo(player.pos));
     }
-    if (pDist < wallDist && !godMode) {
+    if (pDist < wallDist && !godMode && deadT <= 0) {
       playerHits++;
       hud.showDamage(from, player.pos, player.yaw);
       sfx.hurt();
       camRig.kick(-0.004, (Math.random() - 0.5) * 0.004);
+      hp = Math.max(0, hp - (kind === 'laser' ? PLAYER_HEALTH.laser : PLAYER_HEALTH.bullet));
+      if (hp <= 0) die();
     } else if (hit) {
       const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : dir.clone().negate();
       effects.impact(hit.point, n, hit.object.userData.target ? hit.object : undefined);
@@ -215,9 +243,16 @@ function step(dt: number, rawDt: number) {
 
   if (input.pressed.has('KeyV')) setView(camRig.view === 'fp' ? 'tp' : 'fp');
 
-  player.look(input, weapon.ads);
-  player.update(dt, input, { ads: weapon.wantsAds(input) && !weapon.reloading, wantsSprintBlocked: weapon.blocksSprint(input) });
-  weapon.update(dt, input, player);
+  if (deadT > 0) {
+    // 쓰러진 동안은 움직이거나 쏘지 못한다
+    deadT -= dt;
+    weapon.firedThisFrame = false;
+    if (deadT <= 0) respawn();
+  } else {
+    player.look(input, weapon.ads);
+    player.update(dt, input, { ads: weapon.wantsAds(input) && !weapon.reloading, wantsSprintBlocked: weapon.blocksSprint(input) });
+    weapon.update(dt, input, player);
+  }
   if (weapon.firedThisFrame) {
     enemies.noise(player.pos);
     player.pitch = Math.min(player.pitch + weapon.camKick.x, Math.PI / 2 - 0.05);
@@ -243,11 +278,24 @@ function step(dt: number, rawDt: number) {
   character.update(dt, player, weapon, aimTarget);
   playerHead.set(player.pos.x, player.pos.y + THREE.MathUtils.lerp(EYE_HEIGHT, EYE_HEIGHT_CROUCH, player.crouchBlend) + 0.08, player.pos.z);
   enemies.update(dt, player, playerHead, world, enemyHooks);
-  pickups.update(dt, player.pos, () => {
-    weapon.reserve += PICKUP.ammo;
-    sfx.pickup();
-    hud.showPickup(`+${PICKUP.ammo} 탄약`);
-  });
+  if (deadT <= 0) {
+    pickups.update(dt, player.pos, (it) => {
+      if (it.kind === 'medkit') {
+        // 체력이 가득이면 그대로 두어 나중에 쓸 수 있게 한다
+        if (hp >= PLAYER_HEALTH.max) return false;
+        const gain = Math.min(MEDKIT.heal, PLAYER_HEALTH.max - hp);
+        hp += gain;
+        sfx.heal();
+        hud.showPickup(`+${gain} 체력`, 'heal');
+        return true;
+      }
+      weapon.reserve += PICKUP.ammo;
+      sfx.pickup();
+      hud.showPickup(`+${PICKUP.ammo} 탄약`);
+      return true;
+    });
+  }
+  hud.setHealth(hp, PLAYER_HEALTH.max);
   viewmodel.update(player, weapon, cam, world.sun.position.clone().sub(world.sun.target.position).normalize(), {
     sky: world.hemi.color, ground: world.hemi.groundColor,
   });
@@ -277,7 +325,7 @@ function step(dt: number, rawDt: number) {
   fpsAcc += rawDt; fpsFrames++;
   if (fpsAcc > 0.5) { fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
   hud.stats.textContent =
-    `${fpsShown.toFixed(0)} fps  draw ${renderer.info.render.calls}  적 ${enemies.aliveCount}/${enemies.list.length}  피격 ${playerHits}\n` +
+    `${fpsShown.toFixed(0)} fps  draw ${renderer.info.render.calls}  적 ${enemies.aliveCount}/${enemies.list.length}  피격 ${playerHits}  체력 ${hp}\n` +
     `상태 ${weapon.mode(player)}${player.crouched && weapon.mode(player) !== 'crouch' ? '(앉기)' : ''}  속도 ${player.horizSpeed.toFixed(1)}m/s`;
   input.endFrame();
 }
@@ -335,7 +383,12 @@ const debug = {
   /** 스폰 지점으로 */
   teleportSpawn() { player.pos.copy(world.spawn.pos); player.vel.set(0, 0, 0); player.yaw = world.spawn.yaw; },
   /** 탄창 아이템: 위치와 주웠는지, 다시 뿌리기 */
-  pickups() { return pickups.items.map((it) => ({ pos: it.root.position.toArray().map((v) => +v.toFixed(2)), taken: it.taken })); },
+  pickups() { return pickups.items.map((it) => ({ kind: it.kind, pos: it.root.position.toArray().map((v) => +v.toFixed(2)), taken: it.taken })); },
+  /** 주인공 체력: 인자가 있으면 그 값으로 바꾼다(0이면 쓰러진다) */
+  hp(v?: number) {
+    if (v !== undefined) { hp = Math.max(0, Math.min(PLAYER_HEALTH.max, v)); if (hp <= 0 && deadT <= 0) die(); }
+    return { hp, dead: deadT > 0 };
+  },
   respawnPickups(seed = 11) { spawnPickups(seed); },
   killEnemy(i: number) { const e = enemies.list[i]; if (e?.alive) e.die(enemyHooks); },
   /** i번 적에게 플레이어가 맞힌 것처럼 피해를 준다 */

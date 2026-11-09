@@ -74,10 +74,10 @@ export class Sfx {
     this.sweep({ from: 2200, to: 180, dur: 0.22, gain: 0.35 * k, type: 'sawtooth' });
     this.burst({ gain: 0.25 * k, decay: 0.12, freq: 3500, type: 'bandpass', q: 2 });
   }
-  private sweep(o: { from: number; to: number; dur: number; gain: number; type: OscillatorType }) {
+  private sweep(o: { from: number; to: number; dur: number; gain: number; type: OscillatorType; delay?: number }) {
     const ctx = this.ctx;
     if (!ctx || !this.master) return;
-    const t = ctx.currentTime;
+    const t = ctx.currentTime + (o.delay ?? 0);
     const osc = ctx.createOscillator();
     osc.type = o.type;
     osc.frequency.setValueAtTime(o.from, t);
@@ -100,6 +100,11 @@ export class Sfx {
     this.click(1.2);
     this.thump(260, 0.3, 0.06);
     this.sweep({ from: 900, to: 1500, dur: 0.12, gain: 0.12, type: 'triangle' });
+  }
+  /** 구급상자를 주웠을 때: 부드럽게 올라가는 두 음 */
+  heal() {
+    this.sweep({ from: 520, to: 780, dur: 0.14, gain: 0.14, type: 'sine' });
+    this.sweep({ from: 780, to: 1170, dur: 0.18, gain: 0.12, type: 'sine', delay: 0.11 });
   }
   /** 적이 쓰러질 때 */
   enemyDown() {

@@ -27,11 +27,42 @@ export class Hud {
   private toast = document.getElementById('pickup-toast')!;
   private toastTimer = 0;
   /** 아이템을 주웠을 때 탄약 표시 위에 잠깐 */
-  showPickup(text: string) {
+  showPickup(text: string, kind: 'ammo' | 'heal' = 'ammo') {
     this.toast.textContent = text;
+    this.toast.classList.toggle('heal', kind === 'heal');
     this.toast.classList.add('show');
     clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => this.toast.classList.remove('show'), 1400);
+  }
+
+  private health = document.getElementById('health')!;
+  private hpFill = this.health.querySelector('.fill') as HTMLElement;
+  private hpLag = this.health.querySelector('.lag') as HTMLElement;
+  private hpNum = document.getElementById('health-num')!;
+  private dead = document.getElementById('dead')!;
+  private healTimer = 0;
+  private lastHp = -1;
+
+  /** 체력 막대: 초록 → 노랑 → 빨강 */
+  setHealth(hp: number, max: number) {
+    if (hp === this.lastHp) return;
+    const healed = this.lastHp >= 0 && hp > this.lastHp;
+    this.lastHp = hp;
+    const k = Math.max(0, Math.min(1, hp / max));
+    this.hpFill.style.width = `${k * 100}%`;
+    this.hpLag.style.width = `${k * 100}%`;
+    this.hpFill.style.setProperty('--hp-color', `hsl(${Math.round(k * 120)}, 70%, 52%)`);
+    this.hpNum.textContent = String(Math.ceil(hp));
+    this.health.classList.toggle('low', k <= 0.3);
+    if (healed) {
+      this.health.classList.add('heal');
+      clearTimeout(this.healTimer);
+      this.healTimer = window.setTimeout(() => this.health.classList.remove('heal'), 500);
+    }
+  }
+
+  setDead(on: boolean) {
+    this.dead.classList.toggle('show', on);
   }
 
   showKill() {

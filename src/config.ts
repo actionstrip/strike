@@ -236,6 +236,25 @@ export const ENEMY2 = {
 /** 두 적이 함께 쓰는 AI 설정 */
 export type EnemyConfig = typeof ENEMY;
 
+/** 주인공 체력(에너지) */
+export const PLAYER_HEALTH = {
+  max: 100,
+  /** 적 총알 한 발, 레이저 한 발에 깎이는 양 */
+  bullet: 3,//7,
+  laser: 5,//14,
+  /** 쓰러진 뒤 시작점에서 다시 일어나기까지(초) */
+  respawnDelay: 2.5,
+};
+
+/** 구급상자 아이템 */
+export const MEDKIT = {
+  /** 주우면 회복하는 체력(체력이 가득이면 줍지 않는다) */
+  heal: 40,
+  /** 상자의 가장 긴 변(m). 멀리서도 보이게 실제보다 크게 */
+  size: 0.42,
+  glowColor: 0xff5a5a,
+};
+
 /** 탄창 아이템 */
 export const PICKUP = {
   /** 주우면 늘어나는 예비 탄약 */
@@ -271,6 +290,8 @@ export interface MapDef {
   enemies: [number, number];
   /** 탄창 아이템 수 */
   pickups: number;
+  /** 구급상자 수 */
+  medkits: number;
   fog: [number, number];
   spawn?: { x: number; z: number; yaw: number };
   /** 싸우는 범위 [x0, z0, x1, z1](외곽 벽 안쪽). 없으면 충돌 박스 전체 범위. 적 배치와 순찰에 쓴다. */
@@ -285,12 +306,12 @@ export const MAPS: MapDef[] = [
   {
     id: 'arena', name: '컨테이너 기지', desc: '좁은 통로와 2층 발판이 얽힌 근접전 맵', size: '23 × 45m',
     thumb: 'images/map_arena.webp', glb: 'models/map.glb', colliders: 'models/map_colliders.json',
-    enemies: [6, 4], pickups: 5, fog: [45, 110],
+    enemies: [6, 4], pickups: 5, medkits: 3, fog: [45, 110],
   },
   {
     id: 'backrooms', name: '백룸', desc: '끝없이 이어지는 노란 사무실 방과 아치 통로', size: '75 × 20m',
     thumb: 'images/map_backrooms.webp', glb: 'models/map_backrooms.glb', colliders: 'models/map_backrooms_colliders.json',
-    enemies: [12, 8], pickups: 10, fog: [10, 42],
+    enemies: [12, 8], pickups: 10, medkits: 6, fog: [10, 42],
     // 복도 옆 작은 방(의자, 책장)에서 문(+Z, 복도) 쪽을 보고 시작: 복도에 바로 서면 시작하자마자 적 눈에 띈다
     spawn: { x: 0, z: 0.6, yaw: 180 },
     indoor: { color: 0x8c8250, hemiSky: 0xfff0b8, hemiGround: 0x8a7440, hemi: 2.2 },
@@ -298,7 +319,7 @@ export const MAPS: MapDef[] = [
   {
     id: 'desert', name: '사막 마을', desc: '사암 건물 사이 세 갈래 골목과 가운데 광장', size: '46 × 54m',
     thumb: 'images/map_desert.webp', glb: 'models/map_desert.glb', colliders: 'models/map_desert_colliders.json',
-    enemies: [8, 6], pickups: 7, fog: [55, 130],
+    enemies: [8, 6], pickups: 7, medkits: 4, fog: [55, 130],
     // 남쪽 끝 낮은 담 뒤에서 북쪽(-Z)을 보고 시작
     spawn: { x: 0, z: 22, yaw: 0 },
     area: [-22.6, -26.6, 22.6, 26.6],
@@ -306,7 +327,7 @@ export const MAPS: MapDef[] = [
   {
     id: 'port', name: '항구 창고', desc: '선반 통로가 있는 큰 창고와 컨테이너 야적장, 연료 탱크', size: '52 × 56m',
     thumb: 'images/map_port.webp', glb: 'models/map_port.glb', colliders: 'models/map_port_colliders.json',
-    enemies: [9, 7], pickups: 8, fog: [50, 125],
+    enemies: [9, 7], pickups: 8, medkits: 5, fog: [50, 125],
     // 남쪽 정문 안쪽 방호벽 뒤에서 북쪽(창고)을 보고 시작
     spawn: { x: 0, z: 26, yaw: 0 },
     area: [-25.6, -25.4, 25.6, 29.6],
@@ -314,7 +335,7 @@ export const MAPS: MapDef[] = [
   {
     id: 'test', name: '시험장', desc: '엄폐 상자와 표적판이 있는 연습 맵', size: '86 × 86m',
     thumb: '', glb: null, colliders: null,
-    enemies: [ENEMY.count, ENEMY2.count], pickups: 4, fog: [60, 160],
+    enemies: [ENEMY.count, ENEMY2.count], pickups: 4, medkits: 3, fog: [60, 160],
   },
 ];
 export const mapById = (id: string | null) => MAPS.find((m) => m.id === id);
