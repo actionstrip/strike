@@ -57,9 +57,15 @@ export class Minimap {
   }
 
   private time = 0;
+  /** 성능 옵션: 0이면 매 프레임, 아니면 이 간격(초)마다만 다시 그린다 */
+  interval = 0;
+  private lastDraw = 0;
 
   update(playerPos: THREE.Vector3, yaw: number, items: Item[], crates: { x: number; z: number; state: 'closed' | 'open' | 'empty' }[] = [], portal?: { x: number; z: number; active: boolean }) {
-    this.time += 1 / 60;
+    const now = performance.now() / 1000;
+    if (this.interval > 0 && now - this.lastDraw < this.interval) return;
+    this.time += this.interval > 0 ? now - this.lastDraw : 1 / 60;
+    this.lastDraw = now;
     this.resize();
     const S = this.size;
     if (!S) return;

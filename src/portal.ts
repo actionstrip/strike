@@ -236,6 +236,11 @@ export class Portal {
     }
   }
 
+  /** 성능 옵션: 점광원을 장면에서 뺀다(효과 원판과 번개는 그대로) */
+  setLightEnabled(on: boolean) {
+    this.light.visible = on;
+  }
+
   /** 게임을 시작할 때: 방금 이곳을 지나온 것처럼 잠깐 번쩍인다 */
   flash() {
     this.flashT = 0;

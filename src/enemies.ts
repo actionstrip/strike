@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Assets } from './assets';
-import { ENEMY, ENEMY2 } from './config';
+import { ENEMY, ENEMY2, PERF } from './config';
 import { AREA, GunnerEnemy, mulberry32, type Enemy, type EnemyHooks, type WorldRefs } from './enemy';
 import { WalkerEnemy } from './enemy2';
 import type { Player } from './player';
@@ -51,8 +51,25 @@ export class Enemies {
     this.hitMeshes = this.list.flatMap((e) => (e.alive ? e.hitBoxes : []));
   }
 
+  /** 성능 옵션: 멀리 있고 전투 중이 아닌 적은 몇 프레임에 한 번, 모은 시간으로 갱신한다 */
+  farSkip = false;
+  private skipAcc = new Map<Enemy, { t: number; n: number }>();
+
   update(dt: number, player: Player, playerHead: THREE.Vector3, world: WorldRefs, hooks: EnemyHooks) {
-    for (const e of this.list) e.update(dt, player, playerHead, world, hooks);
+    for (const e of this.list) {
+      if (this.farSkip && e.alive && e.state !== 'combat' && e.root.position.distanceTo(player.pos) > PERF.farDistance) {
+        let a = this.skipAcc.get(e);
+        if (!a) this.skipAcc.set(e, (a = { t: 0, n: 0 }));
+        a.t += dt;
+        if (++a.n < PERF.farEvery) continue;
+        const t = Math.min(a.t, 0.1);
+        a.t = 0;
+        a.n = 0;
+        e.update(t, player, playerHead, world, hooks);
+        continue;
+      }
+      e.update(dt, player, playerHead, world, hooks);
+    }
     // 전투를 시작한 적은 근처 동료에게 알린다(동료는 그곳으로 수색하러 온다)
     for (const e of this.list) {
       if (!e.alertOthers) continue;

@@ -3,7 +3,7 @@ import type { Input } from './input';
 import type { Player } from './player';
 import type { Weapon } from './weapon';
 
-type ButtonName = 'fire' | 'aim' | 'crouch' | 'jump' | 'reload' | 'view' | 'pause';
+type ButtonName = 'fire' | 'aim' | 'crouch' | 'jump' | 'reload' | 'view' | 'pause' | 'perf';
 
 /**
  * 모바일 터치 조작. Input의 필드(이동 축, 마우스 이동량, 발사, 조준, 키 눌림)를 채우기만 해서
@@ -17,6 +17,7 @@ type ButtonName = 'fire' | 'aim' | 'crouch' | 'jump' | 'reload' | 'view' | 'paus
 export class TouchControls {
   root = document.getElementById('touch')!;
   onPause?: () => void;
+  onPerf?: () => void;
   private stickZone: HTMLElement;
   private lookZone: HTMLElement;
   private base: HTMLElement;
@@ -36,7 +37,7 @@ export class TouchControls {
     this.base = this.el('div', 'stick-base');
     this.knob = this.el('div', 'stick-knob');
     this.base.appendChild(this.knob);
-    const labels: Record<ButtonName, string> = { fire: '발사', aim: '조준', crouch: '앉기', jump: '점프', reload: 'R', view: '1P', pause: 'Ⅱ' };
+    const labels: Record<ButtonName, string> = { fire: '발사', aim: '조준', crouch: '앉기', jump: '점프', reload: 'R', view: '1P', pause: 'Ⅱ', perf: '⚙' };
     for (const name of Object.keys(labels) as ButtonName[]) {
       const b = this.el('button', `tbtn tbtn-${name}`);
       b.textContent = labels[name];
@@ -125,6 +126,7 @@ export class TouchControls {
     tap('reload', () => i.pressed.add('KeyR'));
     tap('view', () => i.pressed.add('KeyV'));
     tap('pause', () => this.onPause?.());
+    tap('perf', () => this.onPerf?.());
 
     // 움직임과 떼기는 손가락 역할에 따라
     const move = (e: PointerEvent) => {

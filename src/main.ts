@@ -4,7 +4,7 @@ import { loadAssets } from './assets';
 import { Sfx } from './audio';
 import { CameraRig, type View } from './camera';
 import { BODY_LAYER, Character } from './character';
-import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MEDKIT, MOVE, NUKE, PICKUP, PICKUP_ANIM, PLAYER_HEALTH, WEAPON } from './config';
+import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MEDKIT, MOVE, NUKE, PERF, PICKUP, PICKUP_ANIM, PLAYER_HEALTH, WEAPON } from './config';
 import { mulberry32, type Enemy, type EnemyHooks, type EnemyWeapon } from './enemy';
 import { Enemies } from './enemies';
 import { Effects, MuzzleFlash } from './effects';
@@ -19,6 +19,7 @@ import { Pickups } from './pickups';
 import { NukeCrates } from './nukes';
 import { Portal } from './portal';
 import { TouchControls } from './touch';
+import { loadPerf, PerfPanel, PERF_DEFAULT, setShadows, simplifyMaterials, syncSimpleMaterials, type PerfState } from './perf';
 import { renderIcon } from './icon';
 import { backToIntro, chooseMap } from './intro';
 
@@ -26,19 +27,23 @@ import { backToIntro, chooseMap } from './intro';
 const params = new URLSearchParams(location.search);
 const isMobile = params.has('mobile') ? params.get('mobile') !== '0' : matchMedia('(pointer: coarse)').matches;
 document.body.classList.toggle('mobile', isMobile);
-document.body.classList.toggle('stats', params.has('stats'));
 World.lowPower = isMobile;
 
+// 성능 옵션(패널에서 사용자가 켜고 끔). 안티앨리어싱은 렌더러를 만들 때만 정할 수 있어 저장값을 여기서 쓴다.
+const perfAtStart = loadPerf();
 const app = document.getElementById('app')!;
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-// 모바일은 화면이 작고 GPU가 약해 픽셀 비율 상한을 낮춘다
-renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.5 : 2));
+const renderer = new THREE.WebGLRenderer({ antialias: !perfAtStart.noAA, powerPreference: 'high-performance' });
+// 모바일은 화면이 작고 GPU가 약해 픽셀 비율 상한을 낮춘다(해상도 옵션은 여기에 배율을 곱한다)
+const basePixelRatio = Math.min(devicePixelRatio, isMobile ? 1.5 : 2);
+renderer.setPixelRatio(basePixelRatio * perfAtStart.resScale);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.autoClear = false;
+// 통계는 프레임 전체(월드 + 1인칭 총)를 세도록 직접 비운다
+renderer.info.autoReset = false;
 app.appendChild(renderer.domElement);
 
 const input = new Input(renderer.domElement);
@@ -118,6 +123,48 @@ const spawnPickups = (seed = 11) =>
 spawnPickups();
 // 인벤토리 칸의 폭탄 그림(게임 모델을 한 번 그려 만든다)
 hud.setupInventory(NUKE.count, renderIcon(pickups.model('bomb'), envTex));
+
+// ───── 성능 옵션 ─────
+const sunCasts = world.sun.castShadow;
+const fogBase = world.scene.fog instanceof THREE.Fog ? { near: world.scene.fog.near, far: world.scene.fog.far } : null;
+const camFarBase = camRig.camera.far;
+/** 바뀐 항목만 적용한다(처음에는 기본값에서 저장값으로) */
+function applyPerf(s: PerfState, prev: PerfState) {
+  if (s.noShadows !== prev.noShadows) setShadows(renderer, world.scene, world.sun, sunCasts, !s.noShadows);
+  if (s.noLights !== prev.noLights) {
+    effects.light.visible = !s.noLights;
+    effects.laserLight.visible = !s.noLights;
+    portal.setLightEnabled(!s.noLights);
+  }
+  if (s.resScale !== prev.resScale) renderer.setPixelRatio(basePixelRatio * s.resScale);
+  if (s.simpleMat !== prev.simpleMat) simplifyMaterials(world.scene, s.simpleMat);
+  if (s.shortView !== prev.shortView) {
+    camRig.camera.far = s.shortView ? PERF.viewFar : camFarBase;
+    camRig.camera.updateProjectionMatrix();
+    const fog = world.scene.fog;
+    if (fog instanceof THREE.Fog && fogBase) {
+      fog.near = s.shortView ? Math.min(fogBase.near, PERF.fogNear) : fogBase.near;
+      fog.far = s.shortView ? Math.min(fogBase.far, PERF.fogFar) : fogBase.far;
+    }
+  }
+  enemies.farSkip = s.farSkip;
+  minimap.interval = s.minimapLow ? 1 / PERF.minimapHz : 0;
+}
+const perfPanel = new PerfPanel(perfAtStart, perfAtStart.noAA);
+applyPerf(perfAtStart, PERF_DEFAULT);
+perfPanel.onChange = (s, prev) => applyPerf(s, prev);
+/** 성능 패널 열고 닫기(PC는 버튼을 누를 수 있게 마우스 잠금을 잠깐 푼다) */
+function togglePerf(open = !perfPanel.open) {
+  perfPanel.show(open);
+  if (isMobile) return;
+  if (open) document.exitPointerLock?.();
+  else if (started && !cleared) input.requestLock();
+}
+perfPanel.onClose = () => togglePerf(false);
+document.getElementById('open-perf')!.addEventListener('click', (ev) => { ev.stopPropagation(); togglePerf(true); });
+/** 측정: 갱신(시뮬레이션)과 렌더(CPU 쪽 제출) 시간을 0.5초 평균으로 */
+const perfMeasure = { sim: 0, render: 0, frame: 0, n: 0, acc: 0 };
+
 const playerHead = new THREE.Vector3();
 const _pbox = new THREE.Box3();
 const _eray = new THREE.Raycaster();
@@ -236,8 +283,8 @@ function startGame() {
 
 /** 시작 화면을 다시 띄운다(PC: 마우스 잠금이 풀림, 모바일: 일시정지 버튼) */
 function showStartPanel() {
-  // 클리어 뒤에는 시작 화면 대신 결과 화면을 둔다
-  if (cleared) return;
+  // 클리어 뒤에는 시작 화면 대신 결과 화면을 둔다. 성능 패널을 열려고 잠금을 푼 것이면 그대로 둔다.
+  if (cleared || perfPanel.open) return;
   startEl.classList.remove('hidden');
   if (isMobile) { paused = true; touch?.show(false); }
 }
@@ -256,7 +303,10 @@ document.addEventListener('pointerlockchange', () => {
   if (locked) startGame();
   else showStartPanel();
 });
-if (touch) touch.onPause = showStartPanel;
+if (touch) {
+  touch.onPause = showStartPanel;
+  touch.onPerf = () => togglePerf();
+}
 
 function setView(v: View) {
   camRig.view = v;
@@ -324,14 +374,20 @@ function shoot() {
     // 핵컨테이너: 맞으면 뚜껑이 열리고 폭탄이 떠오른다
     const crate = hit.object.userData.nukeCrate as number | undefined;
     if (crate !== undefined && nukes.open(crate)) {
+      // 새로 생긴 폭탄도 단순 재질로
+      if (perfPanel.state.simpleMat) simplifyMaterials(world.scene, true);
       sfx.crateOpen();
       hud.showHit();
     }
   }
 }
 
-function frame() {
+let lastStepAt = 0;
+function frame(now = performance.now()) {
   requestAnimationFrame(frame);
+  // 성능 옵션: 30fps 제한(그 사이 프레임은 건너뛰고, 시간은 clock에 그대로 모인다)
+  if (perfPanel.state.cap30 && now - lastStepAt < 1000 / 30 - 2) return;
+  lastStepAt = now;
   const rawDt = Math.min(clock.getDelta(), 0.05);
   // 모바일 일시정지 중, 또는 세로로 든 동안(회전 안내가 화면을 덮는다)에는 시뮬레이션을 멈춘다
   if (paused || (isMobile && portraitMq.matches)) { input.endFrame(); return; }
@@ -339,8 +395,10 @@ function frame() {
 }
 
 function step(dt: number, rawDt: number) {
-
+  const tStart = performance.now();
   if (input.pressed.has('KeyV')) setView(camRig.view === 'fp' ? 'tp' : 'fp');
+  if (input.pressed.has('KeyP')) togglePerf();
+  if (perfPanel.state.simpleMat) syncSimpleMaterials();
 
   if (started && !cleared) playTime += dt;
   if (cleared) {
@@ -431,12 +489,15 @@ function step(dt: number, rawDt: number) {
   fpFlash.update(dt);
   tpFlash.update(dt);
 
+  const tRender = performance.now();
+  renderer.info.reset();
   renderer.clear();
   renderer.render(world.scene, cam);
   if (camRig.showViewmodel) {
     renderer.clearDepth();
     viewmodel.render(renderer);
   }
+  const tRenderEnd = performance.now();
 
   hud.update(dt, weapon, weapon.spread(player), cam.fov, camRig.view, player.sprinting, player.yaw);
   if (touch) {
@@ -447,7 +508,22 @@ function step(dt: number, rawDt: number) {
   }
   minimap.update(player.pos, player.yaw, pickups.items, nukes.markers(), portal.marker());
   fpsAcc += rawDt; fpsFrames++;
-  if (fpsAcc > 0.5) { fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
+  // 측정(0.5초 평균): 갱신 = 시뮬레이션, 렌더 = 그리기 명령 제출(CPU). 프레임이 둘의 합보다 훨씬 길면 GPU가 병목이다.
+  const pm = perfMeasure;
+  pm.sim += tRender - tStart; pm.render += tRenderEnd - tRender; pm.frame += rawDt * 1000; pm.n++;
+  if (fpsAcc > 0.5) {
+    fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0;
+    if (perfPanel.open) {
+      const sim = pm.sim / pm.n, ren = pm.render / pm.n, fr = pm.frame / pm.n;
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+      perfPanel.setMetrics(
+        `${fpsShown.toFixed(0)} fps   프레임 ${fr.toFixed(1)}ms\n` +
+        `갱신 ${sim.toFixed(1)}ms  렌더 ${ren.toFixed(1)}ms  GPU 대기 약 ${Math.max(0, fr - sim - ren).toFixed(1)}ms\n` +
+        `그리기 ${renderer.info.render.calls}회  삼각형 ${(renderer.info.render.triangles / 1000).toFixed(0)}k\n` +
+        `해상도 ${size.x}×${size.y}`);
+    }
+    pm.sim = pm.render = pm.frame = pm.n = 0;
+  }
   hud.stats.textContent =
     `${fpsShown.toFixed(0)} fps  draw ${renderer.info.render.calls}  적 ${enemies.aliveCount}/${enemies.list.length}  피격 ${playerHits}  체력 ${hp}\n` +
     `상태 ${weapon.mode(player)}${player.crouched && weapon.mode(player) !== 'crouch' ? '(앉기)' : ''}  속도 ${player.horizSpeed.toFixed(1)}m/s`;
@@ -518,7 +594,10 @@ const debug = {
   respawnPickups(seed = 11) { spawnPickups(seed); },
   /** 핵컨테이너: 위치, 상태, 실내 점수 */
   nukes() { return nukes.list.map((c, i) => ({ i, pos: c.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: Math.round(THREE.MathUtils.radToDeg(c.root.rotation.y)), state: c.state, shelter: c.shelter, roof: c.roof, walls: c.walls })); },
-  openCrate(i: number) { const ok = nukes.open(i); if (ok) sfx.crateOpen(); return ok; },
+  openCrate(i: number) { const ok = nukes.open(i); if (ok) { sfx.crateOpen(); if (perfPanel.state.simpleMat) simplifyMaterials(world.scene, true); } return ok; },
+  /** 성능 옵션: 상태 읽기, 바꾸기(일부만), 패널 열기 */
+  perf(next?: Partial<PerfState>) { if (next) perfPanel.set({ ...perfPanel.state, ...next }); return { ...perfPanel.state }; },
+  perfPanel(open: boolean) { perfPanel.show(open); },
   bombs() { return nukes.collected; },
   /** 포털: 위치, 방향, 배율, 활성 여부, 효과 세기 */
   portal() { return { pos: portal.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: Math.round(THREE.MathUtils.radToDeg(portal.root.rotation.y)), k: +portal.k.toFixed(3), height: +(portal.k * 3.71).toFixed(2), active: portal.active, power: +portal.power.toFixed(2), spawn: world.spawn.pos.toArray().map((v) => +v.toFixed(2)) }; },

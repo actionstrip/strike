@@ -13,7 +13,10 @@ export function chooseMap(): Promise<MapDef> {
     return Promise.resolve(preset);
   }
   const base = import.meta.env.BASE_URL;
-  intro.style.setProperty('--bg', `url(${base}images/intro_bg.webp)`);
+  // CSS 변수 안의 상대 url()은 그 변수를 쓰는 스타일시트(빌드 후 assets/) 기준으로 풀리므로,
+  // 페이지 기준 절대 주소로 바꿔 넘긴다(base가 './'인 빌드에서도 images/를 찾게)
+  const bg = new URL(`${base}images/intro_bg.webp`, document.baseURI).href;
+  intro.style.setProperty('--bg', `url("${bg}")`);
   const list = intro.querySelector('.maps')!;
   for (const m of MAPS) {
     const card = document.createElement('button');

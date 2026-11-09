@@ -307,6 +307,19 @@ export const PORTAL = {
   enterWidthMul: 0.85,
 };
 
+/** 성능 옵션(패널 토글)에서 쓰는 값 */
+export const PERF = {
+  /** 먼 적 갱신 줄이기: 이 거리(m) 밖이고 전투 중이 아니면 farEvery 프레임에 한 번 */
+  farDistance: 20,
+  farEvery: 3,
+  /** 시야 거리 줄이기: 카메라 far, 안개 시작과 끝(m) */
+  viewFar: 45,
+  fogNear: 15,
+  fogFar: 40,
+  /** 미니맵 갱신 줄이기: 초당 횟수 */
+  minimapHz: 10,
+};
+
 /** 모바일 터치 조작 */
 export const TOUCH = {
   /** 이동 스틱: 반지름(px), 데드존(0..1), 앞으로 이만큼 밀면 달리기 */
