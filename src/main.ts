@@ -270,7 +270,7 @@ function step(dt: number, rawDt: number) {
   renderer.render(world.scene, cam);
   if (camRig.showViewmodel) {
     renderer.clearDepth();
-    renderer.render(viewmodel.scene, viewmodel.camera);
+    viewmodel.render(renderer);
   }
 
   hud.update(dt, weapon, weapon.spread(player), cam.fov, camRig.view, player.sprinting, player.yaw);

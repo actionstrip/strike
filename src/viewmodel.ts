@@ -1,10 +1,13 @@
 import * as THREE from 'three';
 import type { Assets } from './assets';
-import { EYE_FROM_SHOULDER, FOV } from './config';
+import { EYE_FROM_SHOULDER, FOV, VIEWMODEL_ADS_SIGHT } from './config';
 import type { Player } from './player';
 import { attachHands, GunInstance, RobotRig } from './robot';
 import { ledgeGrabWorld } from './character';
 import type { Weapon } from './weapon';
+
+const _v = new THREE.Vector3();
+const _size = new THREE.Vector2();
 
 /**
  * 1인칭 뷰모델: 로봇 팔(몸통 삼각형 제거)과 총을 별도 씬에 그린다.
@@ -19,6 +22,16 @@ export class Viewmodel {
   private hemi: THREE.HemisphereLight;
   private shoulderOffset = new THREE.Vector3();
   private frameQ = new THREE.Quaternion();
+  /** 이 씬 전용으로 복제한 재질과 원래 값(3인칭 모델과 재질을 나눠 쓰지 않도록) */
+  private fadeMats: { mat: THREE.Material; depthWrite: boolean }[] = [];
+  private fadeSet = new Set<THREE.Material>();
+  /** 조준경 주변 원 안만 반투명하게 하는 셰이더 값(모든 재질이 같은 객체를 나눠 쓴다) */
+  private sightU = {
+    uSightC: { value: new THREE.Vector2() },
+    uSightR: { value: new THREE.Vector2(1, 2) },
+    uSightA: { value: 1 },
+  };
+  private ads = 0;
 
   constructor(assets: Assets) {
     this.camera = new THREE.PerspectiveCamera(FOV.viewmodel, 1, 0.01, 10);
@@ -29,6 +42,25 @@ export class Viewmodel {
     this.rig.actions.Grip.setEffectiveWeight(1);
     this.gun = new GunInstance(assets.gun, { shadows: false });
     this.scene.add(this.rig.root, this.gun.root);
+    for (const root of [this.rig.root, this.gun.root]) {
+      root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        const mat = (m.material as THREE.Material).clone();
+        this.fadeMats.push({ mat, depthWrite: mat.depthWrite });
+        this.fadeSet.add(mat);
+        // 늘 transparent로 둔다(원 밖은 알파 1이라 불투명과 같다)
+        mat.transparent = true;
+        mat.onBeforeCompile = (shader) => {
+          Object.assign(shader.uniforms, this.sightU);
+          shader.fragmentShader = 'uniform vec2 uSightC;\nuniform vec2 uSightR;\nuniform float uSightA;\n' +
+            shader.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
+  float sightK = 1.0 - smoothstep(uSightR.x, uSightR.y, distance(gl_FragCoord.xy, uSightC));
+  gl_FragColor.a *= mix(1.0, uSightA, sightK);`);
+        };
+        m.material = mat;
+      });
+    }
 
     this.hemi = new THREE.HemisphereLight(0xdfeeff, 0x50463a, 1.3);
     this.sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
@@ -44,6 +76,7 @@ export class Viewmodel {
   }
 
   update(player: Player, weapon: Weapon, worldCamera: THREE.Camera, sunDirWorld: THREE.Vector3, hemiColors: { sky: THREE.Color; ground: THREE.Color }) {
+    this.ads = weapon.ads;
     this.camera.fov = weapon.viewmodelFov();
     this.camera.updateProjectionMatrix();
 
@@ -81,6 +114,37 @@ export class Viewmodel {
       lg.palm.applyQuaternion(inv);
     }
     attachHands(this.rig, this.gun, weapon, this.frameQ, lg);
+  }
+
+  /**
+   * 뷰모델을 그린다(월드 위에, 깊이는 미리 지운 상태로).
+   * 반투명일 때는 깊이만 먼저 채운 뒤 색을 그려서 맨 앞 면만 한 번 섞이게 한다(팔과 총이 서로 비치지 않게).
+   */
+  render(renderer: THREE.WebGLRenderer) {
+    // 원 중심은 조준점(AimPoint)이 화면에 찍히는 자리를 따라간다
+    const size = renderer.getDrawingBufferSize(_size);
+    this.gun.aimPoint.getWorldPosition(_v).project(this.camera);
+    this.sightU.uSightC.value.set((_v.x * 0.5 + 0.5) * size.x, (_v.y * 0.5 + 0.5) * size.y);
+    this.sightU.uSightR.value.set(VIEWMODEL_ADS_SIGHT.inner * size.y, VIEWMODEL_ADS_SIGHT.outer * size.y);
+    this.sightU.uSightA.value = THREE.MathUtils.lerp(1, VIEWMODEL_ADS_SIGHT.alpha, this.ads);
+    const fading = this.sightU.uSightA.value < 0.999;
+    if (fading) {
+      for (const f of this.fadeMats) { f.mat.colorWrite = false; f.mat.depthWrite = f.depthWrite; }
+      // 총구 화염처럼 나중에 붙은 것은 깊이 패스에서 빼야 두 번 그려지지 않는다
+      const hidden: THREE.Object3D[] = [];
+      this.scene.traverseVisible((o) => {
+        const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
+        if (mat && !this.fadeSet.has(mat)) hidden.push(o);
+      });
+      for (const o of hidden) o.visible = false;
+      renderer.render(this.scene, this.camera);
+      for (const o of hidden) o.visible = true;
+    }
+    for (const f of this.fadeMats) {
+      f.mat.colorWrite = true;
+      f.mat.depthWrite = f.depthWrite && !fading;
+    }
+    renderer.render(this.scene, this.camera);
   }
 
   setAspect(a: number) {

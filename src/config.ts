@@ -62,6 +62,12 @@ export const FOV = {
   viewmodelAds: 42,
 };
 
+/**
+ * 1인칭 조준(ADS) 때 조준경 주변만 반투명하게 한다.
+ * 조준점이 화면에 찍히는 자리를 중심으로, 반지름은 화면 높이 비율(inner 안은 alpha, outer 밖은 불투명).
+ */
+export const VIEWMODEL_ADS_SIGHT = { alpha: 0.2, inner: 0.07, outer: 0.13 };
+
 /** 3인칭 카메라: 어깨 뒤 오프셋(카메라 기준 x=오른쪽, y=위, z=뒤) */
 export const TP_CAM = {
   pivotHeight: 1.5,

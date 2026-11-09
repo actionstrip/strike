@@ -52,8 +52,9 @@ export class Hud {
     b.style.top = `${px}px`;
     l.style.left = `${-px - 9}px`;
     r.style.left = `${px}px`;
-    const hide = w.ads > 0.6 && view === 'fp' ? 1 : 0;
-    this.cross.style.opacity = String(sprinting ? 0 : 1 - hide);
+    // 1인칭 조준 때는 총이 반투명해져 조준경이 흐려지므로 크로스헤어를 옅게 남긴다
+    const dim = w.ads > 0.6 && view === 'fp' ? 0.4 : 0;
+    this.cross.style.opacity = String(sprinting ? 0 : 1 - dim);
 
     this.hitT -= dt;
     this.killT -= dt;
