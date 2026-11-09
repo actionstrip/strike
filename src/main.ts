@@ -17,6 +17,7 @@ import { Weapon } from './weapon';
 import { World } from './world';
 import { Pickups } from './pickups';
 import { NukeCrates } from './nukes';
+import { Portal } from './portal';
 import { renderIcon } from './icon';
 import { backToIntro, chooseMap } from './intro';
 
@@ -78,17 +79,23 @@ viewmodel.scene.environmentIntensity = 0.5;
 const fpFlash = new MuzzleFlash(viewmodel.gun.muzzle, effects.flashTex, 0.16);
 const tpFlash = new MuzzleFlash(character.gun.muzzle, effects.flashTex, 0.3, BODY_LAYER);
 
-// 미니맵: 벽 그림은 맵을 불러온 지금 한 번 그린다(핵컨테이너가 벽으로 그려지지 않게 그보다 먼저)
+// 미니맵: 벽 그림은 맵을 불러온 지금 한 번 그린다(포털, 핵컨테이너가 벽으로 그려지지 않게 그보다 먼저)
 const minimap = new Minimap();
 minimap.build(world.colliders, world.bounds);
+// 출구 포털: 시작 지점 바로 뒤(거기서 나온 것처럼). 뒤가 좁으면 시작 지점을 계단 앞으로 옮긴다.
+const portal = new Portal(assets, world);
+world.spawn.pos.copy(world.findFree(portal.place(world.spawn.pos, world.spawn.yaw), 0.4));
+player.pos.copy(world.spawn.pos);
 // 아이템(탄창, 구급상자, 컨테이너에서 나오는 폭탄)
 const pickups = new Pickups(assets, world.scene);
 // 미션: 핵컨테이너. 적과 아이템이 겹치지 않게 먼저 놓는다(충돌 박스가 world.colliders에 들어간다).
 const nukes = new NukeCrates(assets, world, pickups);
 nukes.place(mulberry32(23), world.spawn.pos);
 nukes.onAllCollected = () => {
-  // 다 모았다: 게이트는 따로 만든다
-  hud.showPickup('핵원자로폭탄을 모두 모았다!', 'heal');
+  // 다 모았다: 시작 지점의 포털이 열린다
+  portal.activate();
+  sfx.portalActivate();
+  hud.showPickup('포털이 열렸다! 시작 지점의 포털로 돌아가라', 'nuke');
 };
 // 적
 const enemies = new Enemies(assets, world.scene, effects.flashTex);
@@ -112,6 +119,31 @@ let hp = PLAYER_HEALTH.max;
 let deadT = 0;
 /** 디버그: 적 총알이 플레이어를 맞히지 않게 한다 */
 let godMode = false;
+/** 게임 클리어(포털에 들어감). 이후로는 움직이거나 맞지 않는다. */
+let cleared = false;
+/** 플레이 시간(시작 후, 클리어 전까지) */
+let playTime = 0;
+let humT = 0;
+
+/** 포털에 들어갔다: 섬광 후 결과 화면 */
+function gameClear() {
+  cleared = true;
+  weapon.forceAds = null;
+  weapon.forceFire = false;
+  sfx.gameClear();
+  const kills = enemies.list.length - enemies.aliveCount;
+  const m = Math.floor(playTime / 60), s = Math.floor(playTime % 60);
+  hud.showClear([
+    ['걸린 시간', `${m}분 ${String(s).padStart(2, '0')}초`],
+    ['쓰러뜨린 적', `${kills} / ${enemies.list.length}`],
+    ['맞은 횟수', String(playerHits)],
+    ['남은 체력', String(hp)],
+  ]);
+  // 버튼을 누를 수 있게 마우스를 풀어 준다
+  document.exitPointerLock?.();
+}
+document.getElementById('clear-retry')!.addEventListener('click', () => location.reload());
+document.getElementById('clear-maps')!.addEventListener('click', () => backToIntro());
 
 function die() {
   deadT = PLAYER_HEALTH.respawnDelay;
@@ -155,7 +187,7 @@ const enemyHooks: EnemyHooks = {
       effects.tracer(from, end);
       sfx.enemyShot(from.distanceTo(player.pos));
     }
-    if (pDist < wallDist && !godMode && deadT <= 0) {
+    if (pDist < wallDist && !godMode && deadT <= 0 && !cleared) {
       playerHits++;
       hud.showDamage(from, player.pos, player.yaw);
       sfx.hurt();
@@ -184,8 +216,11 @@ startEl.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === renderer.domElement;
+  // 처음 시작할 때: 포털에서 방금 나온 것처럼 번쩍인다
+  if (locked && !started) { portal.flash(); sfx.portalWhoosh(); }
   started = locked || started;
-  startEl.classList.toggle('hidden', locked);
+  // 클리어 뒤에는 시작 화면 대신 결과 화면을 둔다
+  startEl.classList.toggle('hidden', locked || cleared);
 });
 
 function setView(v: View) {
@@ -270,7 +305,11 @@ function step(dt: number, rawDt: number) {
 
   if (input.pressed.has('KeyV')) setView(camRig.view === 'fp' ? 'tp' : 'fp');
 
-  if (deadT > 0) {
+  if (started && !cleared) playTime += dt;
+  if (cleared) {
+    // 클리어 뒤에는 멈춰 있는다(포털 효과와 화면만 움직인다)
+    weapon.firedThisFrame = false;
+  } else if (deadT > 0) {
     // 쓰러진 동안은 움직이거나 쏘지 못한다
     deadT -= dt;
     weapon.firedThisFrame = false;
@@ -345,6 +384,12 @@ function step(dt: number, rawDt: number) {
 
   world.update(dt);
   nukes.update(dt);
+  // 포털: 활성 상태에서 들어가면 게임 클리어. 켜져 있는 동안 가까울수록 크게 웅웅거린다.
+  if (portal.update(dt, player.pos) && !cleared && deadT <= 0) gameClear();
+  if (portal.active && !cleared) {
+    humT -= dt;
+    if (humT <= 0) { humT = 1.1; sfx.portalHum(player.pos.distanceTo(portal.root.position)); }
+  }
   effects.update(dt);
   fpFlash.update(dt);
   tpFlash.update(dt);
@@ -357,7 +402,7 @@ function step(dt: number, rawDt: number) {
   }
 
   hud.update(dt, weapon, weapon.spread(player), cam.fov, camRig.view, player.sprinting, player.yaw);
-  minimap.update(player.pos, player.yaw, pickups.items, nukes.markers());
+  minimap.update(player.pos, player.yaw, pickups.items, nukes.markers(), portal.marker());
   fpsAcc += rawDt; fpsFrames++;
   if (fpsAcc > 0.5) { fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
   hud.stats.textContent =
@@ -370,7 +415,7 @@ requestAnimationFrame(frame);
 /** 검증용 디버그 훅 */
 const debug = {
   player, world, weapon,
-  start() { started = true; startEl.classList.add('hidden'); sfx.unlock(); },
+  start() { if (!started) portal.flash(); started = true; startEl.classList.add('hidden'); sfx.unlock(); },
   setView(v: View) { setView(v); camRig.viewBlend = v === 'tp' ? 1 : 0; },
   /** x=오른쪽, z=앞 (-1..1). treadmill이면 제자리에서 애니메이션만 */
   setMove(x: number, z: number, sprint = false, treadmill = true) {
@@ -430,6 +475,11 @@ const debug = {
   nukes() { return nukes.list.map((c, i) => ({ i, pos: c.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: Math.round(THREE.MathUtils.radToDeg(c.root.rotation.y)), state: c.state, shelter: c.shelter, roof: c.roof, walls: c.walls })); },
   openCrate(i: number) { const ok = nukes.open(i); if (ok) sfx.crateOpen(); return ok; },
   bombs() { return nukes.collected; },
+  /** 포털: 위치, 방향, 배율, 활성 여부, 효과 세기 */
+  portal() { return { pos: portal.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: Math.round(THREE.MathUtils.radToDeg(portal.root.rotation.y)), k: +portal.k.toFixed(3), height: +(portal.k * 3.71).toFixed(2), active: portal.active, power: +portal.power.toFixed(2), spawn: world.spawn.pos.toArray().map((v) => +v.toFixed(2)) }; },
+  activatePortal() { portal.activate(); sfx.portalActivate(); },
+  cleared() { return cleared; },
+  portalObj: portal,
   nukeObj: nukes,
   killEnemy(i: number) { const e = enemies.list[i]; if (e?.alive) e.die(enemyHooks); },
   /** i번 적에게 플레이어가 맞힌 것처럼 피해를 준다 */

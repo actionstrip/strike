@@ -278,6 +278,35 @@ export const NUKE = {
   glowColor: 0x7dff6a,
 };
 
+/**
+ * 돌 포털(시작 지점 뒤). 폭탄을 다 모으면 활성화되고, 들어가면 게임 클리어.
+ * 모델 치수(원본 m): 폭 5.14, 높이 3.71, 받침 높이 0.65(z -1.92~1.86), 앞(+Z) 계단 z 1.86~2.56,
+ * 고리 구멍은 받침 위 0.68~3.6m, 안쪽 반폭 약 1.32m. 아래 값은 모두 원본 치수 기준이고 배율 k를 곱해 쓴다.
+ */
+export const PORTAL = {
+  /** 기본 전체 높이(m). 공간이 좁으면 줄인다(최소 minHeight) */
+  height: 3.2,
+  minHeight: 2.3,
+  /** 시작 지점과 계단 끝 사이 거리(m) */
+  gap: 0.5,
+  /** 원본 치수 */
+  model: {
+    height: 3.71, halfWidth: 2.57, back: 1.92, front: 2.56,
+    platformY: 0.65, platformHalfX: 1.9, platformFront: 1.86,
+    holeY0: 0.68, holeY1: 3.6, holeHalfW: 1.32,
+    pillarInnerX: 1.32, pillarHalfZ: 0.45,
+    stairs: [[1.86, 2.14, 0.49, 1.0], [2.14, 2.34, 0.32, 1.0], [2.34, 2.56, 0.15, 1.8]] as [number, number, number, number][],
+  },
+  /** 켜지는 시간(초), 시작할 때 한 번 번쩍이는 시간(초) */
+  activateTime: 0.9,
+  introFlash: 1.4,
+  arcCount: 6,
+  particleCount: 160,
+  /** 들어간 것으로 보는 범위: 고리 평면 앞뒤(m, 원본), 안쪽 반폭 비율 */
+  enterDepth: 0.4,
+  enterWidthMul: 0.85,
+};
+
 /** 아이템 줍는 동작(짧게 숙였다 일어나고, 아이템은 몸쪽으로 날아와 사라진다) */
 export const PICKUP_ANIM = {
   /** 숙였다 일어나는 전체 시간(초) */

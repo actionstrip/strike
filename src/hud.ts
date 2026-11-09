@@ -98,6 +98,23 @@ export class Hud {
     document.getElementById('inventory')!.classList.toggle('done', n >= this.invTotal);
   }
 
+  /** 게임 클리어: 흰 섬광 뒤 결과 표 */
+  showClear(rows: [string, string][]) {
+    const table = document.getElementById('clear-stats')!;
+    table.innerHTML = '';
+    for (const [k, v] of rows) {
+      const tr = document.createElement('tr');
+      const a = document.createElement('td');
+      const b = document.createElement('td');
+      a.textContent = k;
+      b.textContent = v;
+      tr.append(a, b);
+      table.appendChild(tr);
+    }
+    document.getElementById('clear')!.classList.add('show');
+    this.health.style.opacity = '0';
+  }
+
   setDead(on: boolean) {
     this.dead.classList.toggle('show', on);
   }

@@ -58,7 +58,7 @@ export class Minimap {
 
   private time = 0;
 
-  update(playerPos: THREE.Vector3, yaw: number, items: Item[], crates: { x: number; z: number; state: 'closed' | 'open' | 'empty' }[] = []) {
+  update(playerPos: THREE.Vector3, yaw: number, items: Item[], crates: { x: number; z: number; state: 'closed' | 'open' | 'empty' }[] = [], portal?: { x: number; z: number; active: boolean }) {
     this.time += 1 / 60;
     this.resize();
     const S = this.size;
@@ -127,6 +127,10 @@ export class Minimap {
       else if (c.state === 'empty') drawEmptyCrate(g, r + p.x, r + p.y, s);
     }
     const pulse = 0.5 + 0.5 * Math.sin(this.time * 6);
+    if (portal) {
+      const s = place(portal.x, portal.z, portal.active ? 0.95 : 0.6);
+      drawPortal(g, r + p.x, r + p.y, s, portal.active, pulse);
+    }
     for (const it of items) {
       if (it.taken || it.kind !== 'bomb') continue;
       const s = place(it.root.position.x, it.root.position.z, 0.85);
@@ -216,6 +220,34 @@ function drawCrate(g: CanvasRenderingContext2D, x: number, y: number, s: number)
   g.beginPath();
   g.arc(0, 0, 1.3, 0, Math.PI * 2);
   g.fill();
+  g.restore();
+}
+
+/** 포털: 꺼져 있으면 회색 고리, 열리면 청백색 고리가 맥박친다 */
+function drawPortal(g: CanvasRenderingContext2D, x: number, y: number, s: number, active: boolean, pulse: number) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+  if (active) {
+    g.fillStyle = `rgba(120,210,255,${0.2 + 0.35 * pulse})`;
+    g.beginPath();
+    g.arc(0, 0, 11 + 3 * pulse, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.lineWidth = 4;
+  g.strokeStyle = 'rgba(0,0,0,.7)';
+  g.beginPath();
+  g.ellipse(0, 0, 5, 7, 0, 0, Math.PI * 2);
+  g.stroke();
+  g.lineWidth = 2.2;
+  g.strokeStyle = active ? '#bfeaff' : 'rgba(160,170,180,.9)';
+  g.stroke();
+  if (active) {
+    g.fillStyle = 'rgba(60,140,255,.85)';
+    g.beginPath();
+    g.ellipse(0, 0, 3.6, 5.6, 0, 0, Math.PI * 2);
+    g.fill();
+  }
   g.restore();
 }
 

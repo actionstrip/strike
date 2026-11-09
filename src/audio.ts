@@ -117,6 +117,33 @@ export class Sfx {
     this.sweep({ from: 110, to: 220, dur: 0.35, gain: 0.22, type: 'sawtooth' });
     this.sweep({ from: 880, to: 1320, dur: 0.22, gain: 0.12, type: 'sine', delay: 0.15 });
   }
+  /** 포털이 열릴 때: 지지직 + 올라가는 소리 */
+  portalActivate() {
+    this.burst({ gain: 0.35, decay: 0.5, freq: 2500, type: 'bandpass', q: 1.5 });
+    this.burst({ gain: 0.25, decay: 0.3, freq: 5000, type: 'highpass', delay: 0.18 });
+    this.sweep({ from: 90, to: 520, dur: 1.1, gain: 0.25, type: 'sawtooth' });
+    this.sweep({ from: 400, to: 1600, dur: 0.9, gain: 0.08, type: 'square', delay: 0.2 });
+  }
+  /** 포털이 켜져 있는 동안: 낮은 웅웅(가까울수록 크게) */
+  portalHum(dist: number) {
+    const k = Math.max(0, 1 - dist / 30);
+    if (k <= 0) return;
+    this.sweep({ from: 70, to: 78, dur: 1.15, gain: 0.12 * k, type: 'sawtooth' });
+    if (Math.random() < 0.6) this.burst({ gain: 0.08 * k, decay: 0.06, freq: 4200, type: 'highpass', delay: Math.random() * 0.8 });
+  }
+  /** 게임 시작: 포털에서 막 나온 쉬익 */
+  portalWhoosh() {
+    this.burst({ gain: 0.3, decay: 0.7, freq: 1200, type: 'bandpass', q: 0.8 });
+    this.sweep({ from: 600, to: 120, dur: 0.8, gain: 0.15, type: 'sine' });
+  }
+  /** 게임 클리어: 밝은 화음 셋 */
+  gameClear() {
+    this.burst({ gain: 0.35, decay: 0.9, freq: 3000, type: 'bandpass', q: 0.7 });
+    this.sweep({ from: 523, to: 523, dur: 0.9, gain: 0.14, type: 'triangle', delay: 0.25 });
+    this.sweep({ from: 659, to: 659, dur: 0.9, gain: 0.12, type: 'triangle', delay: 0.4 });
+    this.sweep({ from: 784, to: 784, dur: 1.2, gain: 0.12, type: 'triangle', delay: 0.55 });
+    this.sweep({ from: 1047, to: 1047, dur: 1.4, gain: 0.08, type: 'sine', delay: 0.7 });
+  }
   /** 적이 쓰러질 때 */
   enemyDown() {
     this.thump(60, 0.7, 0.4);

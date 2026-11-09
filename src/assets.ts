@@ -11,6 +11,7 @@ const enemyGunUrl = import.meta.env.BASE_URL + 'models/enemy_gun.glb';
 const enemy2Url = import.meta.env.BASE_URL + 'models/enemy2_robot.glb';
 const nukeCrateUrl = import.meta.env.BASE_URL + 'models/nuclear_container.glb';
 const nukeBombUrl = import.meta.env.BASE_URL + 'models/nuclear_bomb.glb';
+const portalUrl = import.meta.env.BASE_URL + 'models/portal.glb';
 
 export interface Assets {
   robot: GLTF;
@@ -30,6 +31,8 @@ export interface Assets {
   /** 미션: 핵컨테이너(몸통 + 뚜껑), 핵원자로폭탄 */
   nukeCrate: GLTF;
   nukeBomb: GLTF;
+  /** 돌 포털(시작 지점 뒤, 출구). animations[0]은 수정이 도는 클립 */
+  portal: GLTF;
 }
 
 /** 클립에서 팔, 어깨, 목, 머리 트랙을 뺀다. 팔은 IK가, 상체 pitch는 코드가 맡는다. */
@@ -40,11 +43,11 @@ export async function loadAssets(mapDef: MapDef): Promise<Assets> {
   const base = import.meta.env.BASE_URL;
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  const [robot, gun, enemy, enemyGun, enemy2, map, mapColliders, nukeCrate, nukeBomb] = await Promise.all([
+  const [robot, gun, enemy, enemyGun, enemy2, map, mapColliders, nukeCrate, nukeBomb, portal] = await Promise.all([
     loader.loadAsync(robotUrl), loader.loadAsync(gunUrl), loader.loadAsync(enemyUrl), loader.loadAsync(enemyGunUrl), loader.loadAsync(enemy2Url),
     mapDef.glb ? loader.loadAsync(base + mapDef.glb) : Promise.resolve(null),
     mapDef.colliders ? fetch(base + mapDef.colliders).then((r) => r.json() as Promise<MapColliders>) : Promise.resolve(null),
-    loader.loadAsync(nukeCrateUrl), loader.loadAsync(nukeBombUrl),
+    loader.loadAsync(nukeCrateUrl), loader.loadAsync(nukeBombUrl), loader.loadAsync(portalUrl),
   ]);
   const clips: Record<string, THREE.AnimationClip> = {};
   for (const clip of robot.animations) {
@@ -59,7 +62,7 @@ export async function loadAssets(mapDef: MapDef): Promise<Assets> {
   fixEnemyWalkHips(enemyClips);
   // 원본은 24fps 264프레임. 116~148프레임이 몸통이 정면인 걷기 한 주기(두 발이 같은 자리로 돌아온다)
   const enemy2Clips = { Walk: THREE.AnimationUtils.subclip(enemy2.animations[0], 'Walk', 116, 148, 24) };
-  return { robot, gun, clips, enemy, enemyGun, enemyClips, enemy2, enemy2Clips, map, mapColliders, nukeCrate, nukeBomb };
+  return { robot, gun, clips, enemy, enemyGun, enemyClips, enemy2, enemy2Clips, map, mapColliders, nukeCrate, nukeBomb, portal };
 }
 
 /**

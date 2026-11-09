@@ -113,3 +113,27 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f12; fon
 @keyframes inv-pop { 0% { transform: scale(1.5); box-shadow: 0 0 22px 6px rgba(125,255,106,.8); } 100% { transform: none; } }
 @media (max-width: 600px) { #inventory .slot { width: 40px; height: 40px; } #inventory .slot img { width: 36px; height: 36px; } #inventory { bottom: 70px; } }
 #pickup-toast.nuke { color: #7dff6a; }
+
+/* 게임 클리어 */
+#clear { position: fixed; inset: 0; display: none; place-items: center; pointer-events: auto; z-index: 20; }
+#clear.show { display: grid; animation: clear-bg 1.6s ease-out forwards; }
+#clear .flash { position: absolute; inset: 0; background: #e8f6ff; opacity: 0; pointer-events: none; }
+#clear.show .flash { animation: clear-flash 1.2s ease-out; }
+#clear .panel { position: relative; color: #eef6ff; text-align: center; background: rgba(14,22,34,.86); border: 1px solid rgba(140,210,255,.45);
+  border-radius: 12px; padding: 28px 40px 24px; box-shadow: 0 0 40px rgba(90,180,255,.35); opacity: 0; transform: translateY(12px); }
+#clear.show .panel { animation: clear-panel .5s .7s ease-out forwards; }
+#clear h1 { margin: 0 0 6px; font-size: 40px; letter-spacing: .06em; color: #9fe0ff; text-shadow: 0 0 18px rgba(120,210,255,.8); }
+#clear p { margin: 0 0 18px; font-size: 14px; color: #bcd3e6; }
+#clear table { margin: 0 auto 20px; border-collapse: collapse; font-size: 16px; }
+#clear td { padding: 5px 14px; text-align: left; }
+#clear td:first-child { color: #8fb2cc; }
+#clear td:last-child { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+#clear .buttons { display: flex; gap: 10px; justify-content: center; }
+#clear button { font: inherit; font-size: 15px; font-weight: 600; padding: 9px 18px; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(140,210,255,.6); background: rgba(60,140,210,.25); color: #e6f4ff; }
+#clear button:hover { background: rgba(80,170,240,.45); }
+#clear-maps { background: none !important; border-color: #4a5868 !important; color: #b8c6d6 !important; }
+@keyframes clear-flash { 0% { opacity: 0; } 12% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes clear-bg { from { background: rgba(120,200,255,0); } to { background: rgba(20,40,70,.55); } }
+@keyframes clear-panel { to { opacity: 1; transform: none; } }
+@media (max-width: 600px) { #clear .panel { padding: 20px 18px; margin: 0 16px; } #clear h1 { font-size: 30px; } }

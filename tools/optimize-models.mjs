@@ -69,3 +69,5 @@ await run('3d/enermy2_robot.glb', 'public/models/enemy2_robot.glb', { specGloss:
 // (컨테이너의 1비트 발광맵은 원래 검정이라 4x4 검정으로 바뀌어도 같다)
 await run('3d/nuclear_container.glb', 'public/models/nuclear_container.glb', { maxTex: 1024 });
 await run('3d/nuclear_reactor_bomb_chamber.glb', 'public/models/nuclear_bomb.glb', { maxTex: 512 });
+// 돌 포털(시작 지점 뒤, 폭탄을 다 모으면 열리는 출구). 텍스처 없음, 수정이 도는 애니메이션 포함.
+await run('3d/low_poly_stone_portal.glb', 'public/models/portal.glb');
