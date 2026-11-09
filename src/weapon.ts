@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FOV, WEAPON, WEAPON_POSE } from './config';
+import { FOV, PICKUP_ANIM, WEAPON, WEAPON_POSE } from './config';
 import type { Input } from './input';
 import type { Player } from './player';
 
@@ -268,6 +268,12 @@ export class Weapon {
     if (mt > 0) {
       outPos.lerp(P.mantle.pos, mt);
       outQuat.slerp(_q2.setFromEuler(P.mantle.rot), mt);
+    }
+    // 아이템 줍기: 오르기 때처럼 총을 잠깐 아래로 내린다(조준 중에는 덜)
+    const pk = player.pickupDip * PICKUP_ANIM.gunDip * (1 - ads * 0.7);
+    if (pk > 0) {
+      outPos.lerp(P.mantle.pos, pk);
+      outQuat.slerp(_q2.setFromEuler(P.mantle.rot), pk);
     }
     outPos.addScaledVector(P.viewOffset[view], 1 - ads);
 

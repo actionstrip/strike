@@ -56,7 +56,10 @@ export class Minimap {
     this.canvas.height = Math.round(css * dpr);
   }
 
-  update(playerPos: THREE.Vector3, yaw: number, items: Item[]) {
+  private time = 0;
+
+  update(playerPos: THREE.Vector3, yaw: number, items: Item[], crates: { x: number; z: number; state: 'closed' | 'open' | 'empty' }[] = []) {
+    this.time += 1 / 60;
     this.resize();
     const S = this.size;
     if (!S) return;
@@ -99,19 +102,35 @@ export class Minimap {
     g.arc(r, r, r / 2, 0, Math.PI * 2);
     g.stroke();
 
-    // 아이템: 범위 밖이면 테두리에 붙이고 작고 흐리게
+    // 아이템과 핵컨테이너: 범위 밖이면 테두리에 붙이고 작고 흐리게
     const p = { x: 0, y: 0 };
     const edge = r - 7;
-    for (const it of items) {
-      if (it.taken) continue;
-      toMap(it.root.position.x, it.root.position.z, p);
+    /** (x, z)를 미니맵에 놓는다. 범위 밖이면 테두리로. 돌려주는 값: 크기 배율 */
+    const place = (x: number, z: number, faded = 0.6) => {
+      toMap(x, z, p);
       const d = Math.hypot(p.x, p.y);
       const out = d > edge;
       if (out) { p.x *= edge / d; p.y *= edge / d; }
-      g.globalAlpha = out ? 0.6 : 1;
-      const s = out ? 0.75 : 1;
+      g.globalAlpha = out ? faded : 1;
+      return out ? 0.75 : 1;
+    };
+    for (const it of items) {
+      if (it.taken || it.kind === 'bomb') continue;
+      const s = place(it.root.position.x, it.root.position.z);
       if (it.kind === 'medkit') drawMedkit(g, r + p.x, r + p.y, s);
       else drawAmmo(g, r + p.x, r + p.y, s);
+    }
+    // 미션 표시는 아이템 위에, 범위 밖이어도 또렷하게
+    for (const c of crates) {
+      const s = place(c.x, c.z, 0.85);
+      if (c.state === 'closed') drawCrate(g, r + p.x, r + p.y, s);
+      else if (c.state === 'empty') drawEmptyCrate(g, r + p.x, r + p.y, s);
+    }
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * 6);
+    for (const it of items) {
+      if (it.taken || it.kind !== 'bomb') continue;
+      const s = place(it.root.position.x, it.root.position.z, 0.85);
+      drawBomb(g, r + p.x, r + p.y, s, pulse);
     }
     g.globalAlpha = 1;
 
@@ -164,6 +183,69 @@ function drawAmmo(g: CanvasRenderingContext2D, x: number, y: number, s: number) 
   g.fillRect(-3.5, -3, 7, 8.5);
   g.fillStyle = '#e08a45';
   g.fillRect(-1.5, -6, 3, 3);
+  g.restore();
+}
+
+/** 닫힌 핵컨테이너: 노란 원에 방사능 표시(가운데 점 + 날개 셋) */
+function drawCrate(g: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+  g.fillStyle = 'rgba(0,0,0,.75)';
+  g.beginPath();
+  g.arc(0, 0, 9, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#ffd400';
+  g.beginPath();
+  g.arc(0, 0, 7.5, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#1a1a1a';
+  for (let k = 0; k < 3; k++) {
+    const a = -Math.PI / 2 + (k * Math.PI * 2) / 3;
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.arc(0, 0, 6.5, a - 0.5, a + 0.5);
+    g.closePath();
+    g.fill();
+  }
+  g.fillStyle = '#ffd400';
+  g.beginPath();
+  g.arc(0, 0, 2, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#1a1a1a';
+  g.beginPath();
+  g.arc(0, 0, 1.3, 0, Math.PI * 2);
+  g.fill();
+  g.restore();
+}
+
+/** 비운 핵컨테이너: 회색 작은 사각형 */
+function drawEmptyCrate(g: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+  g.fillStyle = 'rgba(0,0,0,.6)';
+  g.fillRect(-5, -5, 10, 10);
+  g.fillStyle = 'rgba(150,158,168,.85)';
+  g.fillRect(-3.5, -3.5, 7, 7);
+  g.restore();
+}
+
+/** 떠 있는 폭탄: 초록 빛이 깜빡이는 캡슐 */
+function drawBomb(g: CanvasRenderingContext2D, x: number, y: number, s: number, pulse: number) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+  g.fillStyle = `rgba(125,255,106,${0.25 + 0.35 * pulse})`;
+  g.beginPath();
+  g.arc(0, 0, 10 + 2 * pulse, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = 'rgba(0,0,0,.8)';
+  g.fillRect(-5, -8, 10, 16);
+  g.fillStyle = '#c8d0d6';
+  g.fillRect(-3.5, -6.5, 7, 13);
+  g.fillStyle = '#7dff6a';
+  g.fillRect(-2, -4, 4, 8);
   g.restore();
 }
 

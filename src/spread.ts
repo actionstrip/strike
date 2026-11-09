@@ -17,6 +17,8 @@ export interface SpreadOptions {
   /** 이 점에서 minFrom보다 가까운 후보는 후보가 모자랄 때만 쓴다 */
   from?: THREE.Vector3;
   minFrom?: number;
+  /** 추가 조건(예: 실내인가). 비싼 검사여도 되게 다른 조건을 통과한 칸에만 부른다. */
+  accept?: (x: number, z: number) => boolean;
 }
 
 /**
@@ -36,7 +38,7 @@ export function spreadSpots(count: number, o: SpreadOptions): THREE.Vector2[] {
     for (let z = area.min.z + 1; z <= area.max.z - 1; z += step) {
       // 약간 흔들어 격자 줄이 보이지 않게
       const px = x + (rand() - 0.5) * step * 0.6, pz = z + (rand() - 0.5) * step * 0.6;
-      if (blocked(px, pz) || !reachable(px, pz)) continue;
+      if (blocked(px, pz) || !reachable(px, pz) || (o.accept && !o.accept(px, pz))) continue;
       const isNear = o.from && Math.hypot(px - o.from.x, pz - o.from.z) < (o.minFrom ?? 0);
       (isNear ? near : far).push(new THREE.Vector2(px, pz));
     }

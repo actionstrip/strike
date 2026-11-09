@@ -59,10 +59,12 @@ export class Character {
       Air: air,
     };
     // 앉기: 서 있는 하체 가중치를 줄이고 같은 방식으로 앉은 클립을 섞는다
-    const cb = player.crouchBlend * (1 - air);
-    if (player.crouchBlend > 0) {
+    // (아이템을 주울 때 잠깐 숙이는 것도 같은 앉은 클립으로 섞는다)
+    const crouch = player.poseCrouch;
+    const cb = crouch * (1 - air);
+    if (crouch > 0) {
       const mw = THREE.MathUtils.smoothstep(hs, 0.15, 1.2);
-      for (const k of ['Idle', 'WalkF', 'WalkB', 'StrafeR', 'StrafeL', 'Run']) w[k] *= 1 - player.crouchBlend;
+      for (const k of ['Idle', 'WalkF', 'WalkB', 'StrafeR', 'StrafeL', 'Run']) w[k] *= 1 - crouch;
       w.CrouchIdle = (1 - mw) * cb;
       w.CrouchF = mw * cb * f;
       w.CrouchB = mw * cb * b;

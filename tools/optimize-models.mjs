@@ -65,3 +65,7 @@ await run('scratch_build/map_desert_raw.glb', 'public/models/map_desert.glb');
 // 항구 창고: tools/build-port.mjs가 만든 박스 맵
 await run('scratch_build/map_port_raw.glb', 'public/models/map_port.glb');
 await run('3d/enermy2_robot.glb', 'public/models/enemy2_robot.glb', { specGloss: true });
+// 미션 오브젝트(Sketchfab 원본): 핵컨테이너(몸통 + 뚜껑, 이름으로 뚜껑을 찾는다), 핵원자로폭탄
+// (컨테이너의 1비트 발광맵은 원래 검정이라 4x4 검정으로 바뀌어도 같다)
+await run('3d/nuclear_container.glb', 'public/models/nuclear_container.glb', { maxTex: 1024 });
+await run('3d/nuclear_reactor_bomb_chamber.glb', 'public/models/nuclear_bomb.glb', { maxTex: 512 });

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CLIP, LOOK, MANTLE, MOVE } from './config';
+import { CLIP, LOOK, MANTLE, MOVE, PICKUP_ANIM } from './config';
 import type { Input } from './input';
 
 export interface Ledge {
@@ -54,8 +54,27 @@ export class Player {
   crouched = false;
   /** 0=서기, 1=앉기 (자세, 눈높이, 충돌 높이가 같이 쓴다) */
   crouchBlend = 0;
+  /** 아이템 줍는 동작이 시작된 뒤 지난 시간(초), -1이면 줍는 중이 아님 */
+  pickupT = -1;
 
   constructor(private colliders: THREE.Box3[]) {}
+
+  startPickup() {
+    this.pickupT = 0;
+  }
+
+  /** 줍느라 숙인 정도 0..1. 빠르게 숙이고 조금 천천히 일어난다. */
+  get pickupDip() {
+    if (this.pickupT < 0) return 0;
+    const p = this.pickupT / PICKUP_ANIM.duration, pk = PICKUP_ANIM.peak;
+    const q = p < pk ? (p / pk) * 0.5 : 0.5 + ((p - pk) / (1 - pk)) * 0.5;
+    return Math.sin(Math.PI * Math.min(q, 1));
+  }
+
+  /** 몸 자세에 쓰는 앉은 정도(실제 앉기 + 줍느라 숙인 것). 충돌 높이에는 쓰지 않는다. */
+  get poseCrouch() {
+    return Math.max(this.crouchBlend, this.pickupDip * PICKUP_ANIM.crouch);
+  }
 
   get horizSpeed() {
     return Math.hypot(this.vel.x, this.vel.z);
@@ -189,6 +208,10 @@ export class Player {
 
   update(dt: number, input: Input, opts: { ads: boolean; wantsSprintBlocked: boolean }) {
     if (this.mantleCooldown > 0) this.mantleCooldown -= dt;
+    if (this.pickupT >= 0) {
+      this.pickupT += dt;
+      if (this.pickupT >= PICKUP_ANIM.duration) this.pickupT = -1;
+    }
     if (this.mantle) {
       this.updateMantle(dt);
       this.crouchBlend = Math.max(0, this.crouchBlend - dt * MOVE.crouchRate * 0.5);

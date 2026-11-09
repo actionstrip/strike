@@ -106,6 +106,17 @@ export class Sfx {
     this.sweep({ from: 520, to: 780, dur: 0.14, gain: 0.14, type: 'sine' });
     this.sweep({ from: 780, to: 1170, dur: 0.18, gain: 0.12, type: 'sine', delay: 0.11 });
   }
+  /** 핵컨테이너가 열릴 때: 쇠 잠금 풀리는 덜컥 + 압력 빠지는 쉬익 */
+  crateOpen() {
+    this.click(0.7);
+    this.thump(140, 0.5, 0.12);
+    this.burst({ gain: 0.28, decay: 0.45, freq: 3500, type: 'highpass', delay: 0.05 });
+  }
+  /** 핵원자로폭탄을 주웠을 때: 낮은 웅 + 높은 음 */
+  bombPickup() {
+    this.sweep({ from: 110, to: 220, dur: 0.35, gain: 0.22, type: 'sawtooth' });
+    this.sweep({ from: 880, to: 1320, dur: 0.22, gain: 0.12, type: 'sine', delay: 0.15 });
+  }
   /** 적이 쓰러질 때 */
   enemyDown() {
     this.thump(60, 0.7, 0.4);

@@ -27,9 +27,10 @@ export class Hud {
   private toast = document.getElementById('pickup-toast')!;
   private toastTimer = 0;
   /** 아이템을 주웠을 때 탄약 표시 위에 잠깐 */
-  showPickup(text: string, kind: 'ammo' | 'heal' = 'ammo') {
+  showPickup(text: string, kind: 'ammo' | 'heal' | 'nuke' = 'ammo') {
     this.toast.textContent = text;
     this.toast.classList.toggle('heal', kind === 'heal');
+    this.toast.classList.toggle('nuke', kind === 'nuke');
     this.toast.classList.add('show');
     clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => this.toast.classList.remove('show'), 1400);
@@ -59,6 +60,42 @@ export class Hud {
       clearTimeout(this.healTimer);
       this.healTimer = window.setTimeout(() => this.health.classList.remove('heal'), 500);
     }
+  }
+
+  private invSlots: HTMLElement[] = [];
+  private invCount = document.getElementById('inv-count')!;
+  private invTotal = 0;
+
+  /** 인벤토리: 모아야 할 폭탄 수만큼 칸을 만든다. 빈 칸은 같은 그림을 어둡게 보여 준다. */
+  setupInventory(total: number, iconUrl: string) {
+    const box = document.querySelector('#inventory .slots')!;
+    box.innerHTML = '';
+    this.invTotal = total;
+    this.invSlots = [];
+    for (let i = 0; i < total; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+      const img = document.createElement('img');
+      img.src = iconUrl;
+      img.alt = '핵원자로폭탄';
+      slot.appendChild(img);
+      box.appendChild(slot);
+      this.invSlots.push(slot);
+    }
+    this.invCount.textContent = `0/${total}`;
+  }
+
+  /** 폭탄을 모은 개수(n)만큼 칸을 채운다. 새로 채운 칸은 반짝인다. */
+  addBomb(n: number) {
+    this.invSlots.forEach((s, i) => s.classList.toggle('full', i < n));
+    const slot = this.invSlots[n - 1];
+    if (slot) {
+      slot.classList.remove('new');
+      void slot.offsetWidth; // 애니메이션 다시 시작
+      slot.classList.add('new');
+    }
+    this.invCount.textContent = `${n}/${this.invTotal}`;
+    document.getElementById('inventory')!.classList.toggle('done', n >= this.invTotal);
   }
 
   setDead(on: boolean) {

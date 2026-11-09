@@ -4,7 +4,7 @@ import { loadAssets } from './assets';
 import { Sfx } from './audio';
 import { CameraRig, type View } from './camera';
 import { BODY_LAYER, Character } from './character';
-import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MEDKIT, MOVE, PICKUP, PLAYER_HEALTH, WEAPON } from './config';
+import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, MEDKIT, MOVE, NUKE, PICKUP, PICKUP_ANIM, PLAYER_HEALTH, WEAPON } from './config';
 import { mulberry32, type Enemy, type EnemyHooks, type EnemyWeapon } from './enemy';
 import { Enemies } from './enemies';
 import { Effects, MuzzleFlash } from './effects';
@@ -16,6 +16,8 @@ import { Minimap } from './minimap';
 import { Weapon } from './weapon';
 import { World } from './world';
 import { Pickups } from './pickups';
+import { NukeCrates } from './nukes';
+import { renderIcon } from './icon';
 import { backToIntro, chooseMap } from './intro';
 
 const app = document.getElementById('app')!;
@@ -76,17 +78,29 @@ viewmodel.scene.environmentIntensity = 0.5;
 const fpFlash = new MuzzleFlash(viewmodel.gun.muzzle, effects.flashTex, 0.16);
 const tpFlash = new MuzzleFlash(character.gun.muzzle, effects.flashTex, 0.3, BODY_LAYER);
 
+// 미니맵: 벽 그림은 맵을 불러온 지금 한 번 그린다(핵컨테이너가 벽으로 그려지지 않게 그보다 먼저)
+const minimap = new Minimap();
+minimap.build(world.colliders, world.bounds);
+// 아이템(탄창, 구급상자, 컨테이너에서 나오는 폭탄)
+const pickups = new Pickups(assets, world.scene);
+// 미션: 핵컨테이너. 적과 아이템이 겹치지 않게 먼저 놓는다(충돌 박스가 world.colliders에 들어간다).
+const nukes = new NukeCrates(assets, world, pickups);
+nukes.place(mulberry32(23), world.spawn.pos);
+nukes.onAllCollected = () => {
+  // 다 모았다: 게이트는 따로 만든다
+  hud.showPickup('핵원자로폭탄을 모두 모았다!', 'heal');
+};
 // 적
 const enemies = new Enemies(assets, world.scene, effects.flashTex);
 enemies.spawn(world.colliders, player.pos, world.bounds, 7, mapDef.enemies, (x, z) => world.reachable(x, z));
-// 탄창 아이템
-const pickups = new Pickups(assets, world.scene);
 const spawnPickups = (seed = 11) =>
-  pickups.spawn({ ammo: mapDef.pickups, medkit: mapDef.medkits }, { colliders: world.colliders, area: world.bounds, reachable: (x, z) => world.reachable(x, z), rand: mulberry32(seed), from: world.spawn.pos });
+  pickups.spawn({ ammo: mapDef.pickups, medkit: mapDef.medkits }, {
+    colliders: world.colliders, area: world.bounds, reachable: (x, z) => world.reachable(x, z), rand: mulberry32(seed), from: world.spawn.pos,
+    avoid: nukes.markers().map((m) => new THREE.Vector2(m.x, m.z)),
+  });
 spawnPickups();
-// 미니맵: 벽 그림은 맵을 불러온 지금 한 번 그린다
-const minimap = new Minimap();
-minimap.build(world.colliders, world.bounds);
+// 인벤토리 칸의 폭탄 그림(게임 모델을 한 번 그려 만든다)
+hud.setupInventory(NUKE.count, renderIcon(pickups.model('bomb'), envTex));
 const playerHead = new THREE.Vector3();
 const _pbox = new THREE.Box3();
 const _eray = new THREE.Raycaster();
@@ -111,6 +125,7 @@ function respawn() {
   hp = PLAYER_HEALTH.max;
   player.mantle = null;
   player.mantleHold = null;
+  player.pickupT = -1;
   player.pos.copy(world.spawn.pos);
   player.vel.set(0, 0, 0);
   player.yaw = world.spawn.yaw;
@@ -188,6 +203,8 @@ resize();
 
 const clock = new THREE.Clock();
 const aimTarget = new THREE.Vector3();
+/** 주운 아이템이 날아올 곳(몸 바로 앞, 1인칭 화면 아래쪽에 보이게) */
+const flyTarget = new THREE.Vector3();
 const tmp = new THREE.Vector3();
 const ray = new THREE.Raycaster();
 let timeScale = 1;
@@ -233,6 +250,12 @@ function shoot() {
       world.hitTarget(hit.object);
       hud.showHit();
       sfx.hit();
+    }
+    // 핵컨테이너: 맞으면 뚜껑이 열리고 폭탄이 떠오른다
+    const crate = hit.object.userData.nukeCrate as number | undefined;
+    if (crate !== undefined && nukes.open(crate)) {
+      sfx.crateOpen();
+      hud.showHit();
     }
   }
 }
@@ -282,23 +305,30 @@ function step(dt: number, rawDt: number) {
   character.update(dt, player, weapon, aimTarget);
   playerHead.set(player.pos.x, player.pos.y + THREE.MathUtils.lerp(EYE_HEIGHT, EYE_HEIGHT_CROUCH, player.crouchBlend) + 0.08, player.pos.z);
   enemies.update(dt, player, playerHead, world, enemyHooks);
-  if (deadT <= 0) {
-    pickups.update(dt, player.pos, (it) => {
-      if (it.kind === 'medkit') {
-        // 체력이 가득이면 그대로 두어 나중에 쓸 수 있게 한다
-        if (hp >= PLAYER_HEALTH.max) return false;
-        const gain = Math.min(MEDKIT.heal, PLAYER_HEALTH.max - hp);
-        hp += gain;
-        sfx.heal();
-        hud.showPickup(`+${gain} 체력`, 'heal');
-        return true;
-      }
+  // 날아가던 아이템은 쓰러진 동안에도 마저 움직이게, 줍기만 막는다
+  pickups.update(dt, player.pos, (it) => {
+    if (deadT > 0) return false;
+    if (it.kind === 'medkit') {
+      // 체력이 가득이면 그대로 두어 나중에 쓸 수 있게 한다
+      if (hp >= PLAYER_HEALTH.max) return false;
+      const gain = Math.min(MEDKIT.heal, PLAYER_HEALTH.max - hp);
+      hp += gain;
+      sfx.heal();
+      hud.showPickup(`+${gain} 체력`, 'heal');
+    } else if (it.kind === 'bomb') {
+      nukes.collect(it);
+      hud.addBomb(nukes.collected);
+      sfx.bombPickup();
+      if (nukes.collected < nukes.total) hud.showPickup(`핵원자로폭탄 획득 ${nukes.collected}/${nukes.total}`, 'nuke');
+    } else {
       weapon.reserve += PICKUP.ammo;
       sfx.pickup();
       hud.showPickup(`+${PICKUP.ammo} 탄약`);
-      return true;
-    });
-  }
+    }
+    // 짧게 숙여 줍는 동작
+    player.startPickup();
+    return true;
+  }, flyTarget.set(player.pos.x - Math.sin(player.yaw) * PICKUP_ANIM.flyAhead, player.pos.y, player.pos.z - Math.cos(player.yaw) * PICKUP_ANIM.flyAhead));
   hud.setHealth(hp, PLAYER_HEALTH.max);
   viewmodel.update(player, weapon, cam, world.sun.position.clone().sub(world.sun.target.position).normalize(), {
     sky: world.hemi.color, ground: world.hemi.groundColor,
@@ -314,6 +344,7 @@ function step(dt: number, rawDt: number) {
   lastPhase = player.gaitPhase;
 
   world.update(dt);
+  nukes.update(dt);
   effects.update(dt);
   fpFlash.update(dt);
   tpFlash.update(dt);
@@ -326,7 +357,7 @@ function step(dt: number, rawDt: number) {
   }
 
   hud.update(dt, weapon, weapon.spread(player), cam.fov, camRig.view, player.sprinting, player.yaw);
-  minimap.update(player.pos, player.yaw, pickups.items);
+  minimap.update(player.pos, player.yaw, pickups.items, nukes.markers());
   fpsAcc += rawDt; fpsFrames++;
   if (fpsAcc > 0.5) { fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
   hud.stats.textContent =
@@ -395,6 +426,11 @@ const debug = {
     return { hp, dead: deadT > 0 };
   },
   respawnPickups(seed = 11) { spawnPickups(seed); },
+  /** 핵컨테이너: 위치, 상태, 실내 점수 */
+  nukes() { return nukes.list.map((c, i) => ({ i, pos: c.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: Math.round(THREE.MathUtils.radToDeg(c.root.rotation.y)), state: c.state, shelter: c.shelter, roof: c.roof, walls: c.walls })); },
+  openCrate(i: number) { const ok = nukes.open(i); if (ok) sfx.crateOpen(); return ok; },
+  bombs() { return nukes.collected; },
+  nukeObj: nukes,
   killEnemy(i: number) { const e = enemies.list[i]; if (e?.alive) e.die(enemyHooks); },
   /** i번 적에게 플레이어가 맞힌 것처럼 피해를 준다 */
   hitEnemy(i: number) { return enemies.list[i]?.damage(player.pos, enemyHooks); },

@@ -255,6 +255,49 @@ export const MEDKIT = {
   glowColor: 0xff5a5a,
 };
 
+/** 미션: 핵컨테이너를 쏴서 열고 핵원자로폭탄을 모은다 */
+export const NUKE = {
+  /** 맵마다 놓는 컨테이너 수(= 모아야 할 폭탄 수) */
+  count: 3,
+  /** 컨테이너의 가장 긴 변(m) */
+  crateSize: 1.1,
+  /** 폭탄 아이템 높이(m) */
+  bombSize: 0.55,
+  /** 뚜껑 경첩이 있는 쪽(컨테이너 로컬): 'back'(-Z) 또는 'front'(+Z) */
+  hingeSide: 'back' as 'back' | 'front',
+  /** 뚜껑이 열리는 각(도)과 시간(초) */
+  lidOpenDeg: 105,
+  lidOpenTime: 0.6,
+  /** 폭탄이 컨테이너 안에서 떠오르는 시간(초)과 떠 있는 높이(발 기준, m) */
+  riseTime: 0.8,
+  bombHover: 1.05,
+  /** 폭탄 줍는 거리(수평, m). 컨테이너가 막고 있어 아이템보다 넓다. */
+  bombRadius: 1.4,
+  /** 실내 점수 기준(지붕 +4, 6m 안 벽 방향 수, 1.5m 안 벽 +1). 후보가 모자라면 낮춘다. */
+  shelterMinScore: 5,
+  glowColor: 0x7dff6a,
+};
+
+/** 아이템 줍는 동작(짧게 숙였다 일어나고, 아이템은 몸쪽으로 날아와 사라진다) */
+export const PICKUP_ANIM = {
+  /** 숙였다 일어나는 전체 시간(초) */
+  duration: 0.5,
+  /** 가장 깊이 숙이는 시점(전체 중 비율) */
+  peak: 0.35,
+  /** 1인칭: 눈이 내려가는 높이(m), 시선이 숙여지는 각(rad) */
+  eyeDrop: 0.25,
+  pitchDown: 0.12,
+  /** 3인칭: 앉은 자세를 섞는 정도 */
+  crouch: 0.6,
+  /** 총을 내리는 정도(오르기 자세 쪽으로) */
+  gunDip: 0.65,
+  /** 아이템이 날아오는 시간(초)과 도착할 높이(발 기준, m) */
+  flyTime: 0.28,
+  flyHeight: 1.0,
+  /** 날아올 곳: 몸 앞 거리(m). 1인칭 화면 아래쪽에 보이게 */
+  flyAhead: 0.6,
+};
+
 /** 미니맵 */
 export const MINIMAP = {
   /** 가운데에서 테두리까지 보이는 거리(m) */

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, TP_CAM } from './config';
+import { EYE_HEIGHT, EYE_HEIGHT_CROUCH, PICKUP_ANIM, TP_CAM } from './config';
 import type { Player } from './player';
 import type { Weapon } from './weapon';
 
@@ -49,9 +49,13 @@ export class CameraRig {
       roll = 0.05 * k;
     }
 
+    // 아이템 줍기: 1인칭에서 눈이 내려가고 시선이 살짝 숙여진다(조준 중에는 덜)
+    const pick = player.pickupDip * (1 - weapon.ads * 0.7) * (1 - this.viewBlend);
+    dip -= pick * PICKUP_ANIM.pitchDown;
+
     const cam = this.camera;
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(player.pitch + this.shake.x + dip, player.yaw + this.shake.y, roll, 'YXZ'));
-    const fpPos = new THREE.Vector3(player.pos.x, player.pos.y + THREE.MathUtils.lerp(EYE_HEIGHT, EYE_HEIGHT_CROUCH, player.crouchBlend) - player.landImpulse * 0.06, player.pos.z);
+    const fpPos = new THREE.Vector3(player.pos.x, player.pos.y + THREE.MathUtils.lerp(EYE_HEIGHT, EYE_HEIGHT_CROUCH, player.crouchBlend) - player.landImpulse * 0.06 - pick * PICKUP_ANIM.eyeDrop, player.pos.z);
 
     if (this.orbit) {
       const pivot = this.orbit.pivot?.clone() ?? new THREE.Vector3(player.pos.x, player.pos.y + this.orbit.height, player.pos.z);
@@ -67,7 +71,7 @@ export class CameraRig {
 
     let pos = fpPos;
     if (this.viewBlend > 0) {
-      const pivot = new THREE.Vector3(player.pos.x, player.pos.y + THREE.MathUtils.lerp(TP_CAM.pivotHeight, TP_CAM.pivotHeightCrouch, player.crouchBlend), player.pos.z);
+      const pivot = new THREE.Vector3(player.pos.x, player.pos.y + THREE.MathUtils.lerp(TP_CAM.pivotHeight, TP_CAM.pivotHeightCrouch, player.poseCrouch), player.pos.z);
       const off = TP_CAM.offset.clone().lerp(TP_CAM.offsetAds, weapon.ads).applyQuaternion(q);
       const want = pivot.clone().add(off);
       const dir = off.clone().normalize();

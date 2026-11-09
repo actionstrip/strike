@@ -98,3 +98,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f12; fon
 /* 미니맵 */
 #minimap { position: absolute; right: 20px; top: 16px; width: 180px; height: 180px; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,.45); }
 @media (max-width: 600px) { #minimap { width: 120px; height: 120px; right: 12px; top: 12px; } }
+
+/* 인벤토리: 핵원자로폭탄 칸 */
+#inventory { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 5px; text-shadow: 0 1px 3px #000; }
+#inventory .label { font-size: 12px; letter-spacing: .04em; color: #cfe8c8; opacity: .9; }
+#inventory .label b { color: #7dff6a; margin-left: 4px; font-variant-numeric: tabular-nums; }
+#inventory .slots { display: flex; gap: 6px; }
+#inventory .slot { width: 56px; height: 56px; border-radius: 8px; background: rgba(10,14,18,.55); border: 1px solid rgba(255,255,255,.22); display: grid; place-items: center; }
+#inventory .slot img { width: 50px; height: 50px; filter: grayscale(1) brightness(.25); opacity: .55; transition: filter .3s, opacity .3s; }
+#inventory .slot.full { border-color: rgba(125,255,106,.75); box-shadow: 0 0 10px rgba(125,255,106,.35) inset; }
+#inventory .slot.full img { filter: none; opacity: 1; }
+#inventory .slot.new { animation: inv-pop .5s ease-out; }
+#inventory.done .label b { animation: hp-pulse .9s ease-in-out infinite; }
+@keyframes inv-pop { 0% { transform: scale(1.5); box-shadow: 0 0 22px 6px rgba(125,255,106,.8); } 100% { transform: none; } }
+@media (max-width: 600px) { #inventory .slot { width: 40px; height: 40px; } #inventory .slot img { width: 36px; height: 36px; } #inventory { bottom: 70px; } }
+#pickup-toast.nuke { color: #7dff6a; }
