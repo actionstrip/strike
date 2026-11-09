@@ -255,6 +255,19 @@ export const MEDKIT = {
   glowColor: 0xff5a5a,
 };
 
+/** 미니맵 */
+export const MINIMAP = {
+  /** 가운데에서 테두리까지 보이는 거리(m) */
+  radius: 22,
+  /** 벽 그림을 미리 그릴 때의 해상도(픽셀/m) */
+  bakePxPerMeter: 8,
+  /** 벽을 그릴 최소 두께(m). 얇은 벽도 보이게 */
+  minWall: 0.45,
+  floorColor: 'rgba(20,26,34,.72)',
+  wallColor: 'rgba(170,186,204,.9)',
+  lowColor: 'rgba(120,134,150,.75)',
+};
+
 /** 탄창 아이템 */
 export const PICKUP = {
   /** 주우면 늘어나는 예비 탄약 */

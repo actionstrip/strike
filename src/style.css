@@ -94,3 +94,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f12; fon
 #dead b { font-size: 34px; letter-spacing: .08em; color: #ff5a4d; text-shadow: 0 2px 8px #000; }
 #dead small { font-size: 14px; color: #ddd; }
 #pickup-toast.heal { color: #6dff8a; }
+
+/* 미니맵 */
+#minimap { position: absolute; right: 20px; top: 16px; width: 180px; height: 180px; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,.45); }
+@media (max-width: 600px) { #minimap { width: 120px; height: 120px; right: 12px; top: 12px; } }

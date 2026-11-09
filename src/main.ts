@@ -12,6 +12,7 @@ import { Hud } from './hud';
 import { Input } from './input';
 import { Player } from './player';
 import { Viewmodel } from './viewmodel';
+import { Minimap } from './minimap';
 import { Weapon } from './weapon';
 import { World } from './world';
 import { Pickups } from './pickups';
@@ -83,6 +84,9 @@ const pickups = new Pickups(assets, world.scene);
 const spawnPickups = (seed = 11) =>
   pickups.spawn({ ammo: mapDef.pickups, medkit: mapDef.medkits }, { colliders: world.colliders, area: world.bounds, reachable: (x, z) => world.reachable(x, z), rand: mulberry32(seed), from: world.spawn.pos });
 spawnPickups();
+// 미니맵: 벽 그림은 맵을 불러온 지금 한 번 그린다
+const minimap = new Minimap();
+minimap.build(world.colliders, world.bounds);
 const playerHead = new THREE.Vector3();
 const _pbox = new THREE.Box3();
 const _eray = new THREE.Raycaster();
@@ -322,6 +326,7 @@ function step(dt: number, rawDt: number) {
   }
 
   hud.update(dt, weapon, weapon.spread(player), cam.fov, camRig.view, player.sprinting, player.yaw);
+  minimap.update(player.pos, player.yaw, pickups.items);
   fpsAcc += rawDt; fpsFrames++;
   if (fpsAcc > 0.5) { fpsShown = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
   hud.stats.textContent =
