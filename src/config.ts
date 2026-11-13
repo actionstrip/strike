@@ -190,6 +190,16 @@ export const ENEMY = {
   alertRadius: 12,
   /** 플레이어 총소리를 듣는 거리 */
   hearRange: 16,
+  /**
+   * 인기척: 주인공이 이 거리(m) 안에 있으면 안 보여도(뒤쪽, 벽 너머) 알아채고 그쪽으로 몸을 돌린다.
+   * 가만히 있어도 아주 가까우면(still), 걸으면 walk, 앉아 걸으면 crouch, 달리면 sprint.
+   */
+  sense: { still: 1.4, crouch: 2.2, walk: 4.5, sprint: 8 },
+  senseInterval: 0.25,
+  /** 시야를 잃을 때 주인공이 달아나던 방향으로 몇 초 앞을 짐작할지 */
+  predictTime: 0.8,
+  /** 이동하며 쏠 때 퍼짐 배율 */
+  moveSpread: 1.7,
   radius: 0.4 * 0.5,
   height: 1.9 * 0.5,
   /** 사망 후 회색으로 바뀌는 시간 */
@@ -235,6 +245,28 @@ export const ENEMY2 = {
 };
 /** 두 적이 함께 쓰는 AI 설정 */
 export type EnemyConfig = typeof ENEMY;
+
+/**
+ * 적 성향. 적마다 하나씩 받고(enemies.ts가 골고루 섞어 나눠 준다), 값은 적마다 ±12% 흔들어 같은 성향끼리도 조금씩 다르다.
+ * - aggression: 0..1, 클수록 거리를 좁히러 다가온다
+ * - reaction: 처음 보거나 맞은 뒤 첫 발까지(초)
+ * - range: 좋아하는 교전 거리(m). 자리를 옮길 때 이 거리에 가까운 곳을 고른다
+ * - dodge: 맞았을 때 피할 확률(나머지는 그 자리에서 돌아서서 맞서 쏜다)
+ * - coverChance: 피할 때 엄폐(안 보이는 곳)를 고를 확률, coverMul: 엄폐 뒤 머무는 시간 배율
+ * - moveFire: 이동하면서도 쏘는가
+ * - pursuit: 놓친 뒤 쫓아오며 다시 찾는 시간(초)
+ * - push / flank / peek: 쫓아올 때 고르는 방식의 비중(곧장 다가오기 / 옆으로 돌아 들어오기 / 엄폐물 가장자리에서 내다보기)
+ * - recover: 쏜 뒤 다시 엄폐로 들어가는 비중(내다보고 쏘고 숨기)
+ */
+export const ENEMY_STYLES = {
+  rusher: { aggression: 0.9, reaction: 0.18, range: 5, dodge: 0.3, coverChance: 0.3, coverMul: 0.5, moveFire: true, pursuit: 14, speedMul: 1.15, push: 0.7, flank: 0.2, peek: 0.1, recover: 0.05 },
+  rifleman: { aggression: 0.55, reaction: 0.24, range: 10, dodge: 0.55, coverChance: 0.55, coverMul: 1, moveFire: true, pursuit: 10, speedMul: 1, push: 0.45, flank: 0.25, peek: 0.3, recover: 0.2 },
+  flanker: { aggression: 0.7, reaction: 0.22, range: 8, dodge: 0.5, coverChance: 0.45, coverMul: 0.8, moveFire: true, pursuit: 12, speedMul: 1.1, push: 0.2, flank: 0.7, peek: 0.1, recover: 0.1 },
+  cautious: { aggression: 0.3, reaction: 0.3, range: 13, dodge: 0.85, coverChance: 0.85, coverMul: 1.5, moveFire: false, pursuit: 8, speedMul: 0.92, push: 0.2, flank: 0.15, peek: 0.65, recover: 0.5 },
+};
+export type EnemyStyle = keyof typeof ENEMY_STYLES;
+/** 배치 순서(이 순서를 섞어서 돌려 쓴다): 소총수가 가장 많다 */
+export const ENEMY_STYLE_MIX: EnemyStyle[] = ['rifleman', 'rusher', 'cautious', 'flanker', 'rifleman', 'rusher', 'cautious'];
 
 /** 주인공 체력(에너지) */
 export const PLAYER_HEALTH = {

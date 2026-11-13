@@ -612,7 +612,7 @@ const debug = {
   /** i번 적을 (x, z)로 옮기고 방향(도) 지정 */
   placeEnemy(i: number, x: number, z: number, yawDeg: number) { enemies.list[i]?.place(x, z, THREE.MathUtils.degToRad(yawDeg)); },
   enemyInfo() {
-    return enemies.list.map((e, i) => ({ i, kind: e.kind, state: e.state, tactic: e.tactic, hp: e.hp, sees: e.seesPlayer, raise: +e.raise.toFixed(2), aimErrDeg: +THREE.MathUtils.radToDeg(e.aimError).toFixed(1), pos: e.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: +THREE.MathUtils.radToDeg(e.yaw).toFixed(0), speed: +e.speed.toFixed(2) }));
+    return enemies.list.map((e, i) => ({ i, kind: e.kind, style: e.persona.style, state: e.state, tactic: e.tactic, move: e.moveKind, hp: e.hp, sees: e.seesPlayer, raise: +e.raise.toFixed(2), aimErrDeg: +THREE.MathUtils.radToDeg(e.aimError).toFixed(1), pos: e.root.position.toArray().map((v) => +v.toFixed(2)), yawDeg: +THREE.MathUtils.radToDeg(e.yaw).toFixed(0), speed: +e.speed.toFixed(2) }));
   },
   playerHits() { return playerHits; },
   /** 월드 지점(x, y, z)을 중심으로 도는 궤도 카메라. angle은 월드 기준(0 = +Z 쪽에서 -Z를 봄) */

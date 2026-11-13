@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Assets } from './assets';
-import { ENEMY, type EnemyConfig } from './config';
+import { ENEMY, ENEMY_STYLES, type EnemyConfig, type EnemyStyle } from './config';
 import { MuzzleFlash } from './effects';
 import type { Player } from './player';
 import { rotateBoneWorld } from './rig';
@@ -120,6 +120,41 @@ export class LifeBar {
 
 export type WorldRefs = { hitMeshes: THREE.Object3D[]; colliders: THREE.Box3[] };
 
+type StyleValues = { -readonly [K in keyof (typeof ENEMY_STYLES)['rifleman']]: (typeof ENEMY_STYLES)['rifleman'][K] };
+/** 적 하나의 성향(ENEMY_STYLES 값을 적마다 조금씩 흔든 것) */
+export type Persona = StyleValues & { style: EnemyStyle };
+
+export function rollPersona(rand: () => number, style?: EnemyStyle): Persona {
+  const names = Object.keys(ENEMY_STYLES) as EnemyStyle[];
+  const st = style ?? names[Math.floor(rand() * names.length)];
+  const base = ENEMY_STYLES[st];
+  const p: Persona = { ...base, style: st };
+  const j = () => 0.88 + rand() * 0.24;
+  p.aggression = Math.min(1, base.aggression * j());
+  p.reaction = base.reaction * j();
+  p.range = base.range * j();
+  p.dodge = Math.min(0.95, base.dodge * j());
+  p.coverChance = Math.min(0.95, base.coverChance * j());
+  p.coverMul = base.coverMul * j();
+  p.pursuit = base.pursuit * j();
+  p.speedMul = base.speedMul * (0.95 + rand() * 0.1);
+  return p;
+}
+
+/**
+ * 전투 중 자리 옮기기 종류. ang은 목표(주인공) 쪽을 0, 반대쪽을 1(×PI)로 본 방향 범위, dist는 이동 거리(m, null이면 cfg.moveDist).
+ * 점수 = 무작위 + 옆으로 움직인 정도 × lat + (그 자리에서 주인공 머리가 보이면 vis, 아니면 hide) - 좋아하는 거리와의 차이 × range
+ */
+export type MoveKind = 'strafe' | 'dodge' | 'cover' | 'push' | 'flank' | 'peek';
+const MOVES: Record<MoveKind, { ang: [number, number]; dist: [number, number] | null; lat: number; vis: number; hide: number; range: number }> = {
+  strafe: { ang: [0.25, 0.75], dist: null, lat: 0.6, vis: 0.8, hide: -0.3, range: 0.4 },
+  dodge: { ang: [0.3, 0.8], dist: null, lat: 0.7, vis: 0.5, hide: 0, range: 0.2 },
+  cover: { ang: [0.2, 1.0], dist: [1.2, 4.5], lat: 0.2, vis: 0, hide: 1.5, range: 0.1 },
+  push: { ang: [0, 0.3], dist: [2, 5], lat: 0.15, vis: 0.5, hide: 0, range: 0.9 },
+  flank: { ang: [0.3, 0.6], dist: [2.5, 5.5], lat: 0.8, vis: 0.3, hide: 0.2, range: 0.5 },
+  peek: { ang: [0, 1], dist: [0.7, 2.4], lat: 0, vis: 2, hide: 0, range: 0.3 },
+};
+
 /** 적 공통: 상태, 순찰, 시야, 전투 판단. 몸을 움직이는 부분(animate)과 무기(attack)는 하위 클래스가 맡는다. */
 export abstract class Enemy {
   abstract readonly kind: 'gunner' | 'walker';
@@ -187,11 +222,29 @@ export abstract class Enemy {
   protected searchMoveT = 0;
   /** 이번에 전투를 시작했다: Enemies가 근처 동료에게 알리고 지운다 */
   alertOthers = false;
+  /** 성향(돌격형, 소총수, 우회형, 신중형) */
+  persona: Persona;
+  /** 지금 하는 자리 옮기기 종류 */
+  moveKind: MoveKind = 'strafe';
+  /** 맞았거나 인기척을 느꼈다: 이 시간 동안은 서서 그쪽으로 몸을 돌린다 */
+  protected threatT = 0;
+  /** 놓친 주인공을 쫓아가 다시 찾는 남은 시간 */
+  protected pursuitT = 0;
+  /** 쫓을 자리를 못 찾았을 때 다시 찾기까지 */
+  protected approachCd = 0;
+  /** 마지막으로 봤을 때 주인공 속도(놓친 뒤 어디로 갔을지 짐작) */
+  protected lastVel = new THREE.Vector3();
 
   constructor(readonly cfg: EnemyConfig, rand: () => number) {
     this.rand = rand;
     this.hp = cfg.health;
     this.sightT = Math.random() * cfg.sightInterval;
+    this.persona = rollPersona(rand);
+  }
+
+  /** 이동하며 쏘면 퍼짐이 커진다 */
+  protected spreadMul() {
+    return this.tactic === 'move' ? this.cfg.moveSpread : 1;
   }
 
   get alive() {
@@ -220,12 +273,24 @@ export abstract class Enemy {
       this.die(hooks);
       return true;
     }
-    // 맞으면 쏜 쪽을 안다
+    // 맞으면 쏜 쪽을 안다: 곧바로 그쪽으로 돌아서고(시야 검사도 바로), 보이면 쏜다
+    const P = this.persona;
     this.lastSeen.copy(fromPos);
-    if (this.state !== 'combat') this.engage(0.4);
+    this.threatT = Math.max(this.threatT, 0.9);
+    this.sightT = 0;
+    this.pursuitT = Math.max(this.pursuitT, P.pursuit);
+    if (this.state !== 'combat') this.engage(P.reaction * 1.4);
     this.searchT = this.cfg.searchTime;
-    // 맞으면 피한다(연달아 맞으면 쿨다운이 지난 뒤 다시). 점사/충전 중이어도 끊고 움직인다.
-    if (this.dodgeCd <= 0 && !this.frozen) this.dodgePending = true;
+    // 피하거나(성향, 체력이 낮으면 거의 항상) 그 자리에서 돌아서 맞서 쏜다. 연달아 맞으면 쿨다운이 지난 뒤 다시 고른다.
+    if (this.dodgeCd <= 0 && !this.frozen) {
+      if (this.rand() < (this.hp <= 2 ? 0.85 : P.dodge)) {
+        this.dodgePending = true;
+      } else {
+        this.realign = true;
+        this.fireT = Math.min(this.fireT, P.reaction);
+        this.dodgeCd = this.cfg.dodgeCooldown * 0.5;
+      }
+    }
     return false;
   }
 
@@ -248,7 +313,7 @@ export abstract class Enemy {
     // 조준점: 전투 중이면 플레이어 가슴, 수색 중이면 마지막으로 본 곳, 평소에는 앞쪽 수평
     const aim = this.aimPoint;
     if (this.state === 'search') aim.set(this.lastSeen.x, this.lastSeen.y + 1.3, this.lastSeen.z);
-    else if (this.state === 'combat') aim.set(player.pos.x, (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
+    else if (this.state === 'combat') aim.set(player.pos.x, this.shotY > 0 ? player.pos.y + this.shotY : (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
     else this.forward(aim).multiplyScalar(5).add(this.root.position).setY(this.root.position.y + this.idleAimHeight());
     this.animate(dt, aim);
     // 라이프 바: 맞은 직후 흰색으로 반짝인다
@@ -258,6 +323,28 @@ export abstract class Enemy {
 
   /** 눈(시야 원점) 월드 위치 */
   protected abstract eyePosition(out: THREE.Vector3): THREE.Vector3;
+  /** 총구(렌즈) 월드 위치 */
+  protected muzzlePosition(out: THREE.Vector3) {
+    return this.eyePosition(out);
+  }
+  /** 총구에서 주인공 몸(가슴~머리)까지 막힘 없이 쏠 수 있는가 */
+  protected shotClear(player: Player, playerHead: THREE.Vector3, hitMeshes: THREE.Object3D[]) {
+    const from = this.muzzlePosition(new THREE.Vector3());
+    for (const y of [(player.pos.y + playerHead.y) * 0.5 + 0.2, playerHead.y - 0.1]) {
+      const to = _v2.set(player.pos.x, y, player.pos.z).sub(from);
+      const d = to.length();
+      _ray.set(from, to.normalize());
+      _ray.far = d;
+      const hit = _ray.intersectObjects(hitMeshes, false)[0];
+      if (!hit || hit.distance > d - 0.3) {
+        this.shotY = y - player.pos.y;
+        return true;
+      }
+    }
+    return false;
+  }
+  /** 노리는 높이(주인공 발 기준): 가슴이 엄폐물에 가리면 머리 */
+  protected shotY = -1;
   /** 평소(경계) 조준 높이(발 기준 m) */
   protected abstract idleAimHeight(): number;
   /** 클립 + 절차적 자세 */
@@ -279,57 +366,98 @@ export abstract class Enemy {
 
   private think(dt: number, player: Player, playerHead: THREE.Vector3, world: WorldRefs, hooks: EnemyHooks) {
     const C = this.cfg;
+    const P = this.persona;
     const pos = this.root.position;
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
+    this.threatT = Math.max(0, this.threatT - dt);
+    this.approachCd -= dt;
     // 시야 검사(주기적으로)
     this.sightT -= dt;
     if (this.sightT <= 0) {
       this.sightT = C.sightInterval;
+      const was = this.seesPlayer;
       this.seesPlayer = this.canSee(playerHead, world.hitMeshes);
       if (this.seesPlayer) {
         this.lastSeen.copy(player.pos);
-        // 수색 중에 다시 보이면 하던 행동(자리 옮기기)을 이어 간다. 처음 발견할 때만 새로 전투를 시작한다.
+        this.lastVel.set(player.vel.x, 0, player.vel.z);
+        // 수색 중에 다시 보이면 하던 행동(자리 옮기기)을 이어 간다(이동 중에도 쏜다). 처음 발견할 때만 새로 전투를 시작한다.
         if (this.state === 'search') this.state = 'combat';
-        else if (this.state !== 'combat') this.engage(0.25);
+        else if (this.state !== 'combat') this.engage(P.reaction);
         this.searchT = C.searchTime;
+        this.pursuitT = P.pursuit;
+        this.coverT = 0;
+      } else if (was && this.state === 'combat') {
+        // 방금 놓쳤다: 달아나던 쪽으로 조금 앞을 짐작한다(막힌 곳이면 본 곳 그대로)
+        const g = _v.copy(this.lastSeen).addScaledVector(this.lastVel, C.predictTime);
+        if (inArea(g.x, g.z, 0.5) && !this.blocked(g, this.colliders)) this.lastSeen.copy(g);
       }
     }
-    // 맞은 직후: 옆으로(가능하면 엄폐물 뒤로) 피한다
+    // 맞은 직후: 옆으로(성향에 따라 엄폐물 뒤로) 피한다
     if (this.dodgePending) {
       this.dodgePending = false;
-      this.planMove(player, playerHead, world, true);
+      const cover = this.hp <= 2 || this.rand() < P.coverChance;
+      this.planMove(player, playerHead, world, cover ? 'cover' : 'dodge', true);
     }
 
     if (this.state === 'combat' || this.state === 'search') {
       this.raise = Math.min(1, this.raise + dt / C.raiseTime);
       this.fireT -= dt;
       this.coverT -= dt;
+      this.pursuitT -= dt;
       if (!this.seesPlayer && this.state === 'combat') {
         this.state = 'search';
         this.searchMoveT = 0;
       } else if (this.seesPlayer && this.state === 'search') {
         this.state = 'combat';
       }
-      // 보이는 동안은 지금 위치, 안 보이면 마지막으로 본 곳을 본다
+      // 보이는 동안은 지금 위치, 안 보이면 마지막으로 본(짐작한) 곳을 본다
       const tgt = this.seesPlayer ? player.pos : this.lastSeen;
       const faceTarget = Math.atan2(-(tgt.x - pos.x), -(tgt.z - pos.z));
+      const rest = angDiff(faceTarget, this.yaw);
 
       if (this.tactic === 'move') {
-        // 자리 옮기기/피하기: 몸은 가는 방향, 상체와 고개는 목표 쪽(한계까지). 이동 중에는 쏘지 않는다.
+        // 자리 옮기기/피하기/쫓기: 몸은 가는 방향, 상체와 고개는 목표 쪽(한계까지)
         this.moveT -= dt;
-        if (this.stepToward(this.moveTo, this.moveSpeed, C.combatTurnSpeed * 2, dt, world.colliders) || this.moveT <= 0) {
-          this.tactic = 'hold';
-          this.volleys = this.pickVolleys();
-          this.fireT = Math.max(this.fireT, 0.15);
-          this.realign = true;
-        }
-        const rest = angDiff(faceTarget, this.yaw);
+        const r = this.stepToward(this.moveTo, this.moveSpeed, C.combatTurnSpeed * 2, dt, world.colliders);
         this.twistTarget = THREE.MathUtils.clamp(rest, -C.twistMax, C.twistMax);
         this.headTarget = THREE.MathUtils.clamp(rest, -C.headMax, C.headMax);
+        // 이동하면서도 쏜다(엄폐로 뛰어드는 중이 아니고, 상체를 틀어 겨눌 수 있는 쪽에 보일 때). 퍼짐은 커진다.
+        if (this.seesPlayer && P.moveFire && this.moveKind !== 'cover' && this.raise >= 1 && this.fireT <= 0 &&
+            Math.abs(rest) < C.twistMax + C.headMax * 0.9 && this.aimError < C.fireAngle * 1.5 &&
+            (this.weaponBusy() || this.shotClear(player, playerHead, world.hitMeshes))) {
+          this.fireT = this.attack(player, playerHead, hooks);
+        }
+        if (r || this.moveT <= 0) {
+          this.tactic = 'hold';
+          this.volleys = this.pickVolleys();
+          this.fireT = Math.max(this.fireT, 0.1);
+          this.realign = true;
+          // 안 보이는 곳에 닿았으면: 엄폐였으면 잠깐 숨어 있고, 아니면 아주 잠깐 살핀 뒤 다음 행동
+          if (!this.seesPlayer) {
+            this.coverT = this.moveKind === 'cover'
+              ? THREE.MathUtils.lerp(C.coverHold[0], C.coverHold[1], this.rand()) * P.coverMul
+              : 0.15 + this.rand() * 0.45;
+          }
+        }
         return;
       }
 
       if (this.state === 'search') {
+        // 맞았거나 인기척을 느꼈으면 우선 그쪽으로 돌아선다. 엄폐 중에도 그쪽을 보고 있는다(보이면 바로 전투).
+        if (this.threatT > 0 || this.coverT > 0) {
+          this.speed = Math.max(0, this.speed - dt * 5);
+          this.turnBody(faceTarget, C.combatTurnSpeed * (this.threatT > 0 ? 1.6 : 0.5), dt);
+          this.twistTarget = 0;
+          this.headTarget = THREE.MathUtils.clamp(angDiff(faceTarget, this.yaw), -C.headMax, C.headMax);
+          this.searchT = Math.max(this.searchT, 1.5);
+          return;
+        }
+        // 놓친 지 얼마 안 됐으면 숨어만 있지 않고 다시 찾아 나선다(성향에 따라 곧장 / 돌아서 / 내다보기)
+        if (this.pursuitT > 0 && this.approachCd <= 0) {
+          if (this.planApproach(player, playerHead, world)) return;
+          this.approachCd = 0.6;
+        }
+        if (this.pursuitT > 0) this.searchT = Math.max(this.searchT, 1.5);
         this.searchT -= dt;
         // 엄폐물 뒤에서 잠깐 기다렸다가, 마지막으로 본 곳으로 걸어가 확인한다
         const far = _v.subVectors(this.lastSeen, pos).setY(0).length() > 1.5;
@@ -363,21 +491,31 @@ export abstract class Enemy {
       const off = Math.abs(angDiff(faceTarget, this.yaw));
       if (off > C.realignAngle) this.realign = true;
       if (this.realign) {
-        const rate = off > C.twistMax * 0.8 ? C.combatTurnSpeed : C.combatTurnSpeed * 0.6;
+        // 맞은 직후에는 더 빨리 돌아선다
+        const rate = (off > C.twistMax * 0.8 ? C.combatTurnSpeed : C.combatTurnSpeed * 0.6) * (this.threatT > 0 ? 1.6 : 1);
         this.turnBody(faceTarget, rate, dt);
         if (Math.abs(angDiff(faceTarget, this.yaw)) < THREE.MathUtils.degToRad(3)) this.realign = false;
       } else {
         this.turnRate = 0;
       }
-      const rest = angDiff(faceTarget, this.yaw);
-      this.twistTarget = THREE.MathUtils.clamp(rest, -C.twistMax, C.twistMax);
-      this.headTarget = THREE.MathUtils.clamp(rest, -C.headMax, C.headMax);
+      const rest2 = angDiff(faceTarget, this.yaw);
+      this.twistTarget = THREE.MathUtils.clamp(rest2, -C.twistMax, C.twistMax);
+      this.headTarget = THREE.MathUtils.clamp(rest2, -C.headMax, C.headMax);
       if (this.raise >= 1 && this.aimError < C.fireAngle && this.fireT <= 0) {
-        this.fireT = this.attack(player, playerHead, hooks);
-        if (this.volleyDone()) this.volleys--;
+        // 눈에는 보여도 총구 앞이 낮은 엄폐물에 막혔으면 쏘지 않고 옆으로 비켜서 쏠 자리를 찾는다
+        if (!this.weaponBusy() && !this.shotClear(player, playerHead, world.hitMeshes)) {
+          if (this.planMove(player, playerHead, world, 'peek')) return;
+          this.fireT = 0.3;
+        } else {
+          this.fireT = this.attack(player, playerHead, hooks);
+          if (this.volleyDone()) this.volleys--;
+        }
       }
-      // 정해진 만큼 쐈으면(점사/충전이 끝난 뒤) 옆으로 자리를 옮긴다
-      if (this.volleys <= 0 && !this.weaponBusy()) this.planMove(player, playerHead, world, false);
+      // 정해진 만큼 쐈으면(점사/충전이 끝난 뒤) 성향과 거리에 맞게 자리를 옮긴다
+      if (this.volleys <= 0 && !this.weaponBusy()) {
+        const d = Math.hypot(player.pos.x - pos.x, player.pos.z - pos.z);
+        if (!this.planMove(player, playerHead, world, this.combatMoveKind(d))) this.volleys = this.pickVolleys();
+      }
       return;
     }
 
@@ -395,7 +533,7 @@ export abstract class Enemy {
       // 걸을 때도 자주 좌우를 본다
       this.scan(dt, THREE.MathUtils.degToRad(45), 0.45);
       this.twistTarget = 0;
-      const r = this.stepToward(this.waypoint, C.patrolSpeed, C.turnSpeed, dt, world.colliders);
+      const r = this.stepToward(this.waypoint, C.patrolSpeed * this.persona.speedMul, C.turnSpeed, dt, world.colliders);
       if (r) {
         this.state = 'look';
         this.lookT = r === 'blocked' ? 0.8 + this.rand() : THREE.MathUtils.lerp(C.lookTime[0], C.lookTime[1], this.rand());
@@ -412,24 +550,80 @@ export abstract class Enemy {
     this.onEngage();
     this.fireT = Math.max(this.fireT, firstShotDelay);
     this.volleys = this.pickVolleys();
+    this.pursuitT = this.persona.pursuit;
     this.alertOthers = true;
   }
 
-  /** 소리(총소리, 동료의 경보)를 듣고 그곳을 수색하러 간다(전투 중이면 무시) */
-  hear(at: THREE.Vector3) {
+  /**
+   * 소리(총소리, 동료의 경보)를 듣고 그쪽으로 돌아서 수색하러 간다(전투 중이면 무시).
+   * pursue: 이 시간만큼은 걸어가 보는 게 아니라 무기를 들고 전투하듯 다가간다(동료 경보 등).
+   * 이미 수색 중이면 하던 이동은 끊지 않고 목표만 바꾼다.
+   */
+  hear(at: THREE.Vector3, pursue = 0) {
     if (!this.alive || this.state === 'combat' || this.frozen) return;
+    this.lastSeen.copy(at);
+    this.threatT = Math.max(this.threatT, 0.5);
+    if (pursue > 0) this.pursuitT = Math.max(this.pursuitT, pursue);
+    if (this.state === 'search') {
+      this.searchT = Math.max(this.searchT, this.cfg.searchTime);
+      return;
+    }
     this.state = 'search';
     this.tactic = 'hold';
-    this.lastSeen.copy(at);
     this.searchT = this.cfg.searchTime;
     this.searchMoveT = 0;
     this.coverT = 0;
     this.volleys = this.pickVolleys();
-    this.fireT = Math.max(this.fireT, 0.25);
-    // 소리 난 쪽으로 바로 고개를 돌린다
+    this.fireT = Math.max(this.fireT, this.persona.reaction);
+  }
+
+  /**
+   * 인기척(아주 가까이서 움직임): 안 보여도 그 자리를 알고 바로 돌아선다. 시야 검사도 곧바로 한다.
+   * 이미 보고 있으면 무시.
+   */
+  sense(at: THREE.Vector3) {
+    if (!this.alive || this.frozen || this.seesPlayer) return;
+    this.sightT = Math.min(this.sightT, 0.05);
+    if (this.state === 'combat' || this.state === 'search') {
+      this.lastSeen.copy(at);
+      // 이미 그쪽을 보고 있는데 안 보이면(벽 너머) 서서 돌아보지 않고 찾으러 간다
+      const pos = this.root.position;
+      const want = Math.atan2(-(at.x - pos.x), -(at.z - pos.z));
+      if (Math.abs(angDiff(want, this.yaw + this.headYaw)) > this.cfg.fov * 0.35) this.threatT = Math.max(this.threatT, 0.8);
+      else this.pursuitT = Math.max(this.pursuitT, 3);
+      this.searchT = Math.max(this.searchT, this.cfg.searchTime * 0.6);
+      return;
+    }
+    this.hear(at, this.persona.pursuit * 0.5);
+    this.threatT = 1.0;
+  }
+
+  /** 쏜 뒤 어떻게 자리를 옮길지: 성향, 거리, 체력으로 고른다 */
+  private combatMoveKind(dist: number): MoveKind {
+    const P = this.persona;
+    const r = this.rand();
+    if (this.hp <= 2 && P.coverChance > 0.4 && r < 0.6) return 'cover';
+    if (dist > P.range * 1.25 && r < 0.3 + 0.6 * P.aggression) return 'push';
+    if (dist < P.range * 0.5) return 'strafe';
+    const r2 = this.rand();
+    if (r2 < P.flank * 0.6) return 'flank';
+    if (r2 < P.flank * 0.6 + P.recover) return 'cover';
+    return 'strafe';
+  }
+
+  /** 놓친 주인공을 찾아 나선다: 성향 비중대로 곧장/돌아서/내다보기 중 하나, 안 되면 곧장 */
+  private planApproach(player: Player, playerHead: THREE.Vector3, world: WorldRefs) {
+    const P = this.persona;
     const pos = this.root.position;
-    const want = Math.atan2(-(at.x - pos.x), -(at.z - pos.z));
-    this.headTarget = THREE.MathUtils.clamp(angDiff(want, this.yaw), -this.cfg.headMax, this.cfg.headMax);
+    if (Math.hypot(this.lastSeen.x - pos.x, this.lastSeen.z - pos.z) < 2.2) {
+      // 거의 다 왔다: 이제부터는 서서 둘러보며 수색
+      this.pursuitT = 0;
+      return false;
+    }
+    const r = this.rand() * (P.push + P.flank + P.peek);
+    const kind: MoveKind = r < P.push ? 'push' : r < P.push + P.flank ? 'flank' : 'peek';
+    if (this.planMove(player, playerHead, world, kind)) return true;
+    return kind !== 'push' && this.planMove(player, playerHead, world, 'push');
   }
 
   private pickVolleys() {
@@ -438,57 +632,59 @@ export abstract class Enemy {
   }
 
   /**
-   * 전투 중 옮길 자리를 고른다. 플레이어 쪽에서 옆으로(가까우면 조금 물러나고, 멀면 조금 다가가며) 1.5~3.5m.
-   * dodge(맞았을 때)거나 체력이 낮으면 플레이어가 못 보는 자리(엄폐)를 우선한다. 그 외에는 계속 쏠 수 있는 자리를 우선.
+   * 전투 중 옮길 자리를 고른다(MOVES의 종류별 방향, 거리, 점수). 목표는 보이면 주인공, 안 보이면 마지막으로 본(짐작한) 곳.
+   * 좋아하는 교전 거리(persona.range)에 가까운 자리일수록 점수가 높다. 갈 곳이 없으면 false.
    */
-  private planMove(player: Player, playerHead: THREE.Vector3, world: WorldRefs, dodge: boolean) {
+  private planMove(player: Player, playerHead: THREE.Vector3, world: WorldRefs, kind: MoveKind, dodge = false) {
     const C = this.cfg;
+    const P = this.persona;
+    const M = MOVES[kind];
     const pos = this.root.position;
-    const base = Math.atan2(player.pos.x - pos.x, player.pos.z - pos.z);
-    const dist = Math.hypot(player.pos.x - pos.x, player.pos.z - pos.z);
-    const wantCover = dodge ? this.rand() < C.coverChance || this.hp <= 2 : this.hp <= 2 && this.rand() < 0.5;
-    // 가까우면 물러나고(뒤쪽 각), 멀면 다가가는(앞쪽 각) 경향
-    const bias = dist < 6 ? 0.35 : dist > 18 ? -0.35 : 0;
+    const tgt = this.seesPlayer ? player.pos : this.lastSeen;
+    const head = new THREE.Vector3(tgt.x, tgt.y + (playerHead.y - player.pos.y), tgt.z);
+    const base = Math.atan2(tgt.x - pos.x, tgt.z - pos.z);
+    const dist = Math.hypot(tgt.x - pos.x, tgt.z - pos.z);
+    const [d0, d1] = M.dist ?? C.moveDist;
     let best: THREE.Vector3 | null = null;
     let bestScore = -Infinity;
     for (let i = 0; i < 14; i++) {
       const side = this.rand() < 0.5 ? -1 : 1;
-      const ang = base + side * Math.PI * THREE.MathUtils.clamp(0.25 + this.rand() * 0.5 + bias * 0.5, 0.1, 0.95);
-      const r = THREE.MathUtils.lerp(C.moveDist[0], C.moveDist[1], this.rand()) * (dodge ? 1.1 : 1);
+      const ang = base + side * Math.PI * THREE.MathUtils.lerp(M.ang[0], M.ang[1], this.rand());
+      let r = THREE.MathUtils.lerp(d0, d1, this.rand()) * (dodge ? 1.1 : 1);
+      // 다가갈 때는 목표 바로 앞(1.5m)까지만
+      if (kind === 'push') r = Math.min(r, dist - 1.5);
+      if (r < 0.6) continue;
       const p = new THREE.Vector3(pos.x + Math.sin(ang) * r, 0, pos.z + Math.cos(ang) * r);
       if (!inArea(p.x, p.z, 0.8) || !this.pathClear(pos, p, world.colliders)) continue;
-      // 그 자리에서 플레이어 머리가 보이는가
+      // 그 자리에서 목표 머리가 보이는가
       const eye = _v3.set(p.x, C.height * 0.85, p.z);
-      const to = _v2.subVectors(playerHead, eye);
+      const to = _v2.subVectors(head, eye);
       const d = to.length();
       _ray.set(eye, to.normalize());
       _ray.far = d;
       const hit = _ray.intersectObjects(world.hitMeshes, false)[0];
       const visible = !hit || hit.distance > d - 0.3;
-      // 플레이어에 대해 옆으로 움직일수록(조준을 흔든다) 좋다
+      // 내다보기는 보이는 자리여야 한다
+      if (kind === 'peek' && !visible) continue;
       const lateral = Math.abs(Math.sin(ang - base));
-      let score = this.rand() * 0.4 + lateral * 0.6;
-      score += wantCover ? (visible ? 0 : 1.5) : visible ? 0.8 : -0.3;
+      const nd = Math.hypot(tgt.x - p.x, tgt.z - p.z);
+      const score = this.rand() * 0.3 + lateral * M.lat + (visible ? M.vis : M.hide) - Math.min(1.5, Math.abs(nd - P.range) / P.range) * M.range;
       if (score > bestScore) {
         bestScore = score;
         best = p;
       }
     }
-    if (!best) {
-      // 옮길 자리가 없으면 그 자리에서 계속 쏜다
-      this.volleys = this.pickVolleys();
-      return;
-    }
+    if (!best) return false;
     this.moveTo.copy(best);
     this.tactic = 'move';
-    this.moveSpeed = dodge ? C.dodgeSpeed : C.combatSpeed;
-    this.moveT = 3.5;
+    this.moveKind = kind;
+    const fast = kind === 'push' || kind === 'flank' ? 1 + 0.25 * P.aggression : kind === 'peek' ? 0.85 : 1;
+    this.moveSpeed = (dodge ? C.dodgeSpeed : C.combatSpeed * fast) * P.speedMul;
+    this.moveT = pos.distanceTo(best) / this.moveSpeed + 1.2;
     this.realign = false;
-    if (dodge) {
-      this.dodgeCd = C.dodgeCooldown;
-      // 엄폐로 숨었으면 잠깐 머물다가 다시 나온다
-      this.coverT = wantCover ? THREE.MathUtils.lerp(C.coverHold[0], C.coverHold[1], this.rand()) : 0;
-    }
+    this.coverT = 0;
+    if (dodge) this.dodgeCd = C.dodgeCooldown;
+    return true;
   }
 
   /**
@@ -711,6 +907,10 @@ export class GunnerEnemy extends Enemy {
     return this.bones.Head.getWorldPosition(out);
   }
 
+  protected muzzlePosition(out: THREE.Vector3) {
+    return this.muzzle.getWorldPosition(out);
+  }
+
   protected idleAimHeight() {
     return 1.2 * ENEMY.size;
   }
@@ -742,8 +942,8 @@ export class GunnerEnemy extends Enemy {
   private shoot(playerHead: THREE.Vector3, player: Player, hooks: EnemyHooks) {
     const from = this.muzzle.getWorldPosition(new THREE.Vector3());
     // 가슴과 머리 사이를 노린다
-    const target = new THREE.Vector3(player.pos.x, (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
-    const dir = this.spreadDir(target.sub(from).normalize(), ENEMY.spread);
+    const target = new THREE.Vector3(player.pos.x, this.shotY > 0 ? player.pos.y + this.shotY : (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
+    const dir = this.spreadDir(target.sub(from).normalize(), ENEMY.spread * this.spreadMul());
     this.flash.fire();
     this.recoil = 1;
     hooks.onFire(this, from, dir, 'bullet');

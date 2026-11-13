@@ -217,7 +217,7 @@ export class WalkerEnemy extends Enemy {
       } else if (this.chargeT <= 0) {
         // 렌즈가 보는 방향으로 쏜다(충전 중 플레이어가 피하면 빗나간다)
         const from = this.muzzle.getWorldPosition(new THREE.Vector3());
-        const dir = this.spreadDir(this.lensForward(new THREE.Vector3()), ENEMY2.spread);
+        const dir = this.spreadDir(this.lensForward(new THREE.Vector3()), ENEMY2.spread * this.spreadMul());
         this.recoil = 1;
         this.flashT = 0.12;
         hooks.onFire(this, from, dir, 'laser');
