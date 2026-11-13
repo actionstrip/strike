@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Assets } from './assets';
 import { ENEMY2 } from './config';
-import { bone, Enemy, LifeBar, patchGrey, UP, type EnemyHooks } from './enemy';
+import { bone, Enemy, fitCullSpheres, LifeBar, patchGrey, UP, type EnemyHooks } from './enemy';
 import type { Player } from './player';
 import { rotateBoneWorld } from './rig';
 
@@ -23,6 +23,7 @@ const K = ENEMY2.size;
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
 
 export class WalkerEnemy extends Enemy {
   readonly kind = 'walker';
@@ -39,6 +40,9 @@ export class WalkerEnemy extends Enemy {
   private topRest = new THREE.Quaternion();
   /** 몸통 본 기준 렌즈 정면 방향 */
   private lensFwdLocal = new THREE.Vector3();
+  /** 조금 늦게 따라가는 조준점(레이저가 실제로 노리는 곳) */
+  private lagAim = new THREE.Vector3();
+  private lagInit = false;
   private phase = 0;
   private pitch = 0;
   private recoil = 0;
@@ -69,7 +73,6 @@ export class WalkerEnemy extends Enemy {
       if (!m.isMesh) return;
       m.castShadow = true;
       m.receiveShadow = true;
-      m.frustumCulled = false;
       const c = (m.material as THREE.MeshStandardMaterial).clone();
       patchGrey(c, this.greyU);
       this.mats.push(c);
@@ -81,6 +84,7 @@ export class WalkerEnemy extends Enemy {
     this.walk = this.mixer.clipAction(assets.enemy2Clips.Walk);
     this.walk.play();
     this.mixer.update(0);
+    fitCullSpheres(this.model);
     this.topRest.copy(this.top.quaternion);
     this.root.updateMatrixWorld(true);
 
@@ -217,7 +221,15 @@ export class WalkerEnemy extends Enemy {
       } else if (this.chargeT <= 0) {
         // 렌즈가 보는 방향으로 쏜다(충전 중 플레이어가 피하면 빗나간다)
         const from = this.muzzle.getWorldPosition(new THREE.Vector3());
-        const dir = this.spreadDir(this.lensForward(new THREE.Vector3()), ENEMY2.spread * this.spreadMul());
+        // 렌즈 방향에서 trackAssist 안이면 늦게 따라간 조준점 쪽으로 꺾어 쏜다
+        const lens = this.lensForward(new THREE.Vector3());
+        const want = _v2.subVectors(this.lagAim, from).normalize();
+        const ang = lens.angleTo(want);
+        if (ang > 1e-4) {
+          const k = Math.min(1, ENEMY2.trackAssist / ang);
+          lens.applyQuaternion(_q.identity().slerp(_q2.setFromUnitVectors(lens, want), k));
+        }
+        const dir = this.spreadDir(lens, ENEMY2.spread * this.spreadMul());
         this.recoil = 1;
         this.flashT = 0.12;
         hooks.onFire(this, from, dir, 'laser');
@@ -289,10 +301,13 @@ export class WalkerEnemy extends Enemy {
     // 맞으면 몸통이 뒤로 젖혀지고, 쏘면 렌즈가 위로 튄다
     rotateBoneWorld(this.top, right, this.pitch + 0.3 * this.flinch + 0.08 * this.recoil);
 
-    // 조준 오차(발사 판정)
+    // 조준 오차(발사 판정): 레이저가 노리는 늦은 조준점 기준, 발사 때 꺾어 줄 수 있는 각도는 빼고 본다
     this.muzzle.getWorldPosition(lensPos);
     const fwd = this.lensForward(new THREE.Vector3());
-    this.aimError = fwd.angleTo(_v2.subVectors(aim, lensPos).normalize());
+    if (!this.lagInit || this.state !== 'combat') this.lagAim.copy(aim);
+    else this.lagAim.lerp(aim, 1 - Math.exp(-dt / C.aimLag));
+    this.lagInit = true;
+    this.aimError = Math.max(0, fwd.angleTo(_v2.subVectors(this.lagAim, lensPos).normalize()) - C.trackAssist);
 
     // 충전: 렌즈 앞 붉은 빛이 커지며 깜박인다. 발사 직후 크게 번쩍.
     const ch = this.charge;

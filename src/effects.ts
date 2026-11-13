@@ -72,12 +72,28 @@ export class MuzzleFlash {
   }
 }
 
-interface Tracer { line: THREE.Line; t: number }
-interface Spark { pts: THREE.Points; vel: Float32Array; t: number }
+/*
+ * 예광선, 불꽃, 레이저는 미리 만들어 두고 돌려 쓴다(풀).
+ * 쏠 때마다 재질을 새로 만들고 지우면, 같은 재질을 쓰는 효과가 하나도 안 남는 순간 three.js가 셰이더를 지우고
+ * 다음 발사 때 다시 컴파일한다. 그때마다 화면이 100ms 안팎 멈췄다.
+ */
+interface Tracer { line: THREE.Line; mat: THREE.LineBasicMaterial; t: number }
+interface Spark { pts: THREE.Points; mat: THREE.PointsMaterial; vel: Float32Array; t: number }
 interface Beam { group: THREE.Group; core: THREE.Mesh; outer: THREE.Mesh; dot: THREE.Sprite; t: number }
 
 const BEAM_TIME = 0.2;
+const SPARK_N = 8;
 const _y = new THREE.Vector3(0, 1, 0);
+
+/** 쉬고 있는 것(t <= 0)을 고르고, 다 쓰는 중이면 남은 시간이 가장 짧은 것을 다시 쓴다 */
+function pick<T extends { t: number }>(pool: T[]) {
+  let best = pool[0];
+  for (const it of pool) {
+    if (it.t <= 0) return it;
+    if (it.t < best.t) best = it;
+  }
+  return best;
+}
 
 export class Effects {
   flashTex = flashTexture();
@@ -108,6 +124,43 @@ export class Effects {
     scene.add(this.light);
     this.laserLight = new THREE.PointLight(0xff3020, 0, 5, 2);
     scene.add(this.laserLight);
+
+    // 예광선: 점 2개짜리 선
+    for (let i = 0; i < 32; i++) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      const mat = new THREE.LineBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+      const line = new THREE.Line(g, mat);
+      line.frustumCulled = false;
+      line.visible = false;
+      scene.add(line);
+      this.tracers.push({ line, mat, t: 0 });
+    }
+    // 불꽃 파편
+    for (let i = 0; i < 24; i++) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SPARK_N * 3), 3));
+      const mat = new THREE.PointsMaterial({ color: 0xffd28a, size: 0.035, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+      const pts = new THREE.Points(g, mat);
+      pts.frustumCulled = false;
+      pts.visible = false;
+      scene.add(pts);
+      this.sparks.push({ pts, mat, vel: new Float32Array(SPARK_N * 3), t: 0 });
+    }
+    // 레이저 빔
+    const mk = (color: number, opacity: number) =>
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    for (let i = 0; i < 12; i++) {
+      const group = new THREE.Group();
+      const core = new THREE.Mesh(this.beamGeo, mk(0xffe6e0, 1));
+      const outer = new THREE.Mesh(this.beamGeo, mk(0xff2a14, 0.55));
+      const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flashTex, color: 0xff4a2a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      dot.scale.setScalar(0.35);
+      group.add(core, outer, dot);
+      group.visible = false;
+      scene.add(group);
+      this.beams.push({ group, core, outer, dot, t: 0 });
+    }
   }
 
   muzzleLight(pos: THREE.Vector3) {
@@ -140,20 +193,18 @@ export class Effects {
   }
 
   private sparkBurst(p: THREE.Vector3, normal: THREE.Vector3) {
-    // 불꽃 파편
-    const n = 8;
-    const pos = new Float32Array(n * 3);
-    const vel = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-      pos.set([p.x, p.y, p.z], i * 3);
-      const v = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.4).addScaledVector(normal, 2.2);
-      vel.set([v.x, v.y, v.z], i * 3);
+    const s = pick(this.sparks);
+    const pos = s.pts.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < SPARK_N; i++) {
+      pos.setXYZ(i, p.x, p.y, p.z);
+      v.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.4).addScaledVector(normal, 2.2);
+      s.vel.set([v.x, v.y, v.z], i * 3);
     }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffd28a, size: 0.035, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    this.scene.add(pts);
-    this.sparks.push({ pts, vel, t: 0.25 });
+    pos.needsUpdate = true;
+    s.t = 0.25;
+    s.mat.opacity = 1;
+    s.pts.visible = true;
   }
 
   tracer(from: THREE.Vector3, to: THREE.Vector3) {
@@ -161,10 +212,14 @@ export class Effects {
     const dir = to.clone().sub(from);
     const len = dir.length();
     const a = from.clone().addScaledVector(dir, Math.min(0.6, len * 0.1) / len);
-    const g = new THREE.BufferGeometry().setFromPoints([a, to]);
-    const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
-    this.scene.add(line);
-    this.tracers.push({ line, t: 0.05 });
+    const tr = pick(this.tracers);
+    const pos = tr.line.geometry.getAttribute('position') as THREE.BufferAttribute;
+    pos.setXYZ(0, a.x, a.y, a.z);
+    pos.setXYZ(1, to.x, to.y, to.z);
+    pos.needsUpdate = true;
+    tr.t = 0.05;
+    tr.mat.opacity = 0.85;
+    tr.line.visible = true;
   }
 
   /** 레이저 빔: 하얀 심과 붉은 겉빛, 끝점의 붉은 점. 짧게 남았다가 가늘어지며 사라진다. */
@@ -172,22 +227,14 @@ export class Effects {
     const dir = to.clone().sub(from);
     const len = dir.length();
     if (len < 1e-3) return;
-    const group = new THREE.Group();
-    group.position.copy(from).addScaledVector(dir, 0.5);
-    group.quaternion.setFromUnitVectors(_y, dir.divideScalar(len));
-    const mk = (color: number, opacity: number) =>
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
-    const core = new THREE.Mesh(this.beamGeo, mk(0xffe6e0, 1));
-    core.scale.set(0.012, len, 0.012);
-    const outer = new THREE.Mesh(this.beamGeo, mk(0xff2a14, 0.55));
-    outer.scale.set(0.045, len, 0.045);
-    group.add(core, outer);
-    const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flashTex, color: 0xff4a2a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    dot.position.set(0, len / 2, 0);
-    dot.scale.setScalar(0.35);
-    group.add(dot);
-    this.scene.add(group);
-    this.beams.push({ group, core, outer, dot, t: BEAM_TIME });
+    const b = pick(this.beams);
+    b.group.position.copy(from).addScaledVector(dir, 0.5);
+    b.group.quaternion.setFromUnitVectors(_y, dir.divideScalar(len));
+    b.core.scale.set(0.012, len, 0.012);
+    b.outer.scale.set(0.045, len, 0.045);
+    b.dot.position.set(0, len / 2, 0);
+    b.t = BEAM_TIME;
+    b.group.visible = true;
     this.laserLight.position.copy(to);
   }
 
@@ -195,8 +242,8 @@ export class Effects {
     this.lightT -= dt;
     this.light.intensity = this.lightT > 0 ? 18 : 0;
     let laserGlow = 0;
-    for (let i = this.beams.length - 1; i >= 0; i--) {
-      const b = this.beams[i];
+    for (const b of this.beams) {
+      if (b.t <= 0) continue;
       b.t -= dt;
       const k = Math.max(0, b.t / BEAM_TIME);
       laserGlow = Math.max(laserGlow, k);
@@ -206,27 +253,17 @@ export class Effects {
       (b.core.material as THREE.MeshBasicMaterial).opacity = k;
       (b.outer.material as THREE.MeshBasicMaterial).opacity = 0.55 * k;
       (b.dot.material as THREE.SpriteMaterial).opacity = k;
-      if (b.t <= 0) {
-        b.group.removeFromParent();
-        for (const m of [b.core, b.outer]) (m.material as THREE.Material).dispose();
-        (b.dot.material as THREE.Material).dispose();
-        this.beams.splice(i, 1);
-      }
+      if (b.t <= 0) b.group.visible = false;
     }
     this.laserLight.intensity = 14 * laserGlow;
-    for (let i = this.tracers.length - 1; i >= 0; i--) {
-      const tr = this.tracers[i];
+    for (const tr of this.tracers) {
+      if (tr.t <= 0) continue;
       tr.t -= dt;
-      (tr.line.material as THREE.LineBasicMaterial).opacity = Math.max(0, tr.t / 0.05) * 0.85;
-      if (tr.t <= 0) {
-        tr.line.removeFromParent();
-        tr.line.geometry.dispose();
-        (tr.line.material as THREE.Material).dispose();
-        this.tracers.splice(i, 1);
-      }
+      tr.mat.opacity = Math.max(0, tr.t / 0.05) * 0.85;
+      if (tr.t <= 0) tr.line.visible = false;
     }
-    for (let i = this.sparks.length - 1; i >= 0; i--) {
-      const s = this.sparks[i];
+    for (const s of this.sparks) {
+      if (s.t <= 0) continue;
       s.t -= dt;
       const pos = s.pts.geometry.getAttribute('position') as THREE.BufferAttribute;
       for (let k = 0; k < pos.count; k++) {
@@ -234,13 +271,8 @@ export class Effects {
         pos.setXYZ(k, pos.getX(k) + s.vel[k * 3] * dt, pos.getY(k) + s.vel[k * 3 + 1] * dt, pos.getZ(k) + s.vel[k * 3 + 2] * dt);
       }
       pos.needsUpdate = true;
-      (s.pts.material as THREE.PointsMaterial).opacity = Math.max(0, s.t / 0.25);
-      if (s.t <= 0) {
-        s.pts.removeFromParent();
-        s.pts.geometry.dispose();
-        (s.pts.material as THREE.Material).dispose();
-        this.sparks.splice(i, 1);
-      }
+      s.mat.opacity = Math.max(0, s.t / 0.25);
+      if (s.t <= 0) s.pts.visible = false;
     }
   }
 }

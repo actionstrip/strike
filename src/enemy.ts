@@ -101,7 +101,12 @@ export class LifeBar {
     this.sprite.renderOrder = 10;
     parent.add(this.sprite);
   }
+  /** 마지막으로 그린 상태. 같으면 다시 그리지 않는다(캔버스 → GPU 업로드가 적 1기당 약 1.5ms로 비싸다) */
+  private drawn = '';
   draw(hp: number, max: number, hitFlash: number) {
+    const key = `${hp}/${max}/${hitFlash > 0 ? 1 : 0}`;
+    if (key === this.drawn) return;
+    this.drawn = key;
     const g = this.canvas.getContext('2d')!;
     const w = this.canvas.width, h = this.canvas.height;
     g.clearRect(0, 0, w, h);
@@ -119,6 +124,21 @@ export class LifeBar {
 }
 
 export type WorldRefs = { hitMeshes: THREE.Object3D[]; colliders: THREE.Box3[] };
+
+/**
+ * 화면 밖 적은 그리지 않도록(그림자 포함) 스킨 메시의 경계 구를 정해 둔다.
+ * 지금(바인드) 자세로 구한 뒤 걷기, 조준, 쓰러지기 자세까지 덮도록 넉넉히 키운다.
+ */
+export function fitCullSpheres(model: THREE.Object3D, grow = 1.6) {
+  model.updateMatrixWorld(true);
+  model.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (!m.isSkinnedMesh) return;
+    m.frustumCulled = true;
+    m.computeBoundingSphere();
+    m.boundingSphere!.radius *= grow;
+  });
+}
 
 type StyleValues = { -readonly [K in keyof (typeof ENEMY_STYLES)['rifleman']]: (typeof ENEMY_STYLES)['rifleman'][K] };
 /** 적 하나의 성향(ENEMY_STYLES 값을 적마다 조금씩 흔든 것) */
@@ -222,6 +242,20 @@ export abstract class Enemy {
   protected searchMoveT = 0;
   /** 이번에 전투를 시작했다: Enemies가 근처 동료에게 알리고 지운다 */
   alertOthers = false;
+  /** 자세(animate) 갱신 간격(프레임). 화면 밖이거나 멀면 Enemies가 늘린다 */
+  animEvery = 1;
+  /** 가림 검사: 다음 검사까지 남은 시간, 연속으로 가려진 횟수(Enemies가 쓴다) */
+  occT = Math.random() * 0.1;
+  occHidden = 0;
+  private animAcc = 0;
+  private animN = 0;
+  private shadowOn = true;
+  /** 그림자 드리우기 켜고 끄기(멀리 있는 적은 끈다). 바뀔 때만 메시를 돈다. */
+  setCastShadow(on: boolean) {
+    if (on === this.shadowOn) return;
+    this.shadowOn = on;
+    this.root.traverse((o) => { if ((o as THREE.Mesh).isMesh && !this.hitBoxes.includes(o as THREE.Mesh)) o.castShadow = on; });
+  }
   /** 성향(돌격형, 소총수, 우회형, 신중형) */
   persona: Persona;
   /** 지금 하는 자리 옮기기 종류 */
@@ -315,7 +349,13 @@ export abstract class Enemy {
     if (this.state === 'search') aim.set(this.lastSeen.x, this.lastSeen.y + 1.3, this.lastSeen.z);
     else if (this.state === 'combat') aim.set(player.pos.x, this.shotY > 0 ? player.pos.y + this.shotY : (player.pos.y + playerHead.y) * 0.5 + 0.2, player.pos.z);
     else this.forward(aim).multiplyScalar(5).add(this.root.position).setY(this.root.position.y + this.idleAimHeight());
-    this.animate(dt, aim);
+    // 화면 밖이거나 멀면(Enemies가 animEvery를 정함) 자세는 몇 프레임에 한 번, 모은 시간으로 갱신한다. 판단(think)은 매 프레임.
+    this.animAcc += dt;
+    if (++this.animN >= this.animEvery) {
+      this.animate(this.animAcc, aim);
+      this.animAcc = 0;
+      this.animN = 0;
+    }
     // 라이프 바: 맞은 직후 흰색으로 반짝인다
     if (this.alive) this.lifeBar.draw(this.hp, this.cfg.health, this.hitFlash);
     this.lifeBar.sprite.visible = this.alive;
@@ -414,6 +454,9 @@ export abstract class Enemy {
       const tgt = this.seesPlayer ? player.pos : this.lastSeen;
       const faceTarget = Math.atan2(-(tgt.x - pos.x), -(tgt.z - pos.z));
       const rest = angDiff(faceTarget, this.yaw);
+      // 너무 멀면 쏘지 않는다(쏘던 점사는 마저 쏜다)
+      const dist = Math.hypot(player.pos.x - pos.x, player.pos.z - pos.z);
+      const inRange = dist <= C.fireRange || this.weaponBusy();
 
       if (this.tactic === 'move') {
         // 자리 옮기기/피하기/쫓기: 몸은 가는 방향, 상체와 고개는 목표 쪽(한계까지)
@@ -422,7 +465,7 @@ export abstract class Enemy {
         this.twistTarget = THREE.MathUtils.clamp(rest, -C.twistMax, C.twistMax);
         this.headTarget = THREE.MathUtils.clamp(rest, -C.headMax, C.headMax);
         // 이동하면서도 쏜다(엄폐로 뛰어드는 중이 아니고, 상체를 틀어 겨눌 수 있는 쪽에 보일 때). 퍼짐은 커진다.
-        if (this.seesPlayer && P.moveFire && this.moveKind !== 'cover' && this.raise >= 1 && this.fireT <= 0 &&
+        if (this.seesPlayer && inRange && P.moveFire && this.moveKind !== 'cover' && this.raise >= 1 && this.fireT <= 0 &&
             Math.abs(rest) < C.twistMax + C.headMax * 0.9 && this.aimError < C.fireAngle * 1.5 &&
             (this.weaponBusy() || this.shotClear(player, playerHead, world.hitMeshes))) {
           this.fireT = this.attack(player, playerHead, hooks);
@@ -460,7 +503,9 @@ export abstract class Enemy {
         if (this.pursuitT > 0) this.searchT = Math.max(this.searchT, 1.5);
         this.searchT -= dt;
         // 엄폐물 뒤에서 잠깐 기다렸다가, 마지막으로 본 곳으로 걸어가 확인한다
-        const far = _v.subVectors(this.lastSeen, pos).setY(0).length() > 1.5;
+        // 그 자리가 다가올 거리보다 멀면 걸어가지 않고 돌아보기만 한다
+        const sd = _v.subVectors(this.lastSeen, pos).setY(0).length();
+        const far = sd > 1.5 && sd < P.approach;
         if (this.coverT <= 0 && far && this.searchMoveT < 8) {
           this.searchMoveT += dt;
           if (this.stepToward(this.lastSeen, C.searchSpeed, C.combatTurnSpeed, dt, world.colliders) === 'blocked') this.searchMoveT = 99;
@@ -469,17 +514,18 @@ export abstract class Enemy {
           // 걸어가는 동안은 수색 시간을 아낀다(도착해서 둘러볼 시간)
           this.searchT = Math.max(this.searchT, C.searchTime * 0.6);
         } else {
-          // 도착했거나 갈 수 없으면 서서 넓게 둘러본다
+          // 도착했거나 갈 수 없으면 서서 넓게 둘러본다(오래 서 있지 않게 시간이 두 배로 간다)
+          this.searchT -= dt;
           this.speed = Math.max(0, this.speed - dt * 4);
           this.turnRate = 0;
           this.twistTarget = 0;
           this.scan(dt, C.headMax, 0.25);
         }
         if (this.searchT <= 0) {
-          // 수색 끝: 이 근처를 새 순찰 구역으로
+          // 수색 끝: 이 근처를 새 순찰 구역으로 삼고 곧 다시 돌아다닌다
           this.state = 'look';
           this.home.copy(pos);
-          this.lookT = THREE.MathUtils.lerp(C.lookTime[0], C.lookTime[1], this.rand());
+          this.lookT = 0.3 + this.rand() * 0.6;
           this.stateT = 0;
           this.glanceT = 0.4;
         }
@@ -501,6 +547,14 @@ export abstract class Enemy {
       const rest2 = angDiff(faceTarget, this.yaw);
       this.twistTarget = THREE.MathUtils.clamp(rest2, -C.twistMax, C.twistMax);
       this.headTarget = THREE.MathUtils.clamp(rest2, -C.headMax, C.headMax);
+      // 쏠 거리 밖: 겨누고 지켜보다가, 맞았거나 다가갈 만한 거리면 앞으로 나온다
+      if (!inRange) {
+        if (this.approachCd <= 0 && (dist <= P.approach + 4 || this.threatT > 0)) {
+          this.approachCd = 1.2;
+          if (this.planMove(player, playerHead, world, this.rand() < P.flank ? 'flank' : 'push')) return;
+        }
+        return;
+      }
       if (this.raise >= 1 && this.aimError < C.fireAngle && this.fireT <= 0) {
         // 눈에는 보여도 총구 앞이 낮은 엄폐물에 막혔으면 쏘지 않고 옆으로 비켜서 쏠 자리를 찾는다
         if (!this.weaponBusy() && !this.shotClear(player, playerHead, world.hitMeshes)) {
@@ -563,14 +617,18 @@ export abstract class Enemy {
     if (!this.alive || this.state === 'combat' || this.frozen) return;
     this.lastSeen.copy(at);
     this.threatT = Math.max(this.threatT, 0.5);
-    if (pursue > 0) this.pursuitT = Math.max(this.pursuitT, pursue);
+    // 먼 소리는 돌아보기만 하고 곧 순찰로 돌아간다(몰려오지 않는다)
+    const pos = this.root.position;
+    const near = Math.hypot(at.x - pos.x, at.z - pos.z) < this.persona.approach;
+    const t = near ? this.cfg.searchTime : 1.2;
+    if (pursue > 0 && near) this.pursuitT = Math.max(this.pursuitT, pursue);
     if (this.state === 'search') {
-      this.searchT = Math.max(this.searchT, this.cfg.searchTime);
+      this.searchT = Math.max(this.searchT, t);
       return;
     }
     this.state = 'search';
     this.tactic = 'hold';
-    this.searchT = this.cfg.searchTime;
+    this.searchT = t;
     this.searchMoveT = 0;
     this.coverT = 0;
     this.volleys = this.pickVolleys();
@@ -603,10 +661,12 @@ export abstract class Enemy {
     const P = this.persona;
     const r = this.rand();
     if (this.hp <= 2 && P.coverChance > 0.4 && r < 0.6) return 'cover';
-    if (dist > P.range * 1.25 && r < 0.3 + 0.6 * P.aggression) return 'push';
+    // 다가오기와 돌아 들어오기는 가까울 때만(멀면 그 근처에서 옆으로 움직이며 쏜다)
+    const near = dist < P.approach;
+    if (near && dist > P.range * 1.25 && r < 0.3 + 0.6 * P.aggression) return 'push';
     if (dist < P.range * 0.5) return 'strafe';
     const r2 = this.rand();
-    if (r2 < P.flank * 0.6) return 'flank';
+    if (near && r2 < P.flank * 0.6) return 'flank';
     if (r2 < P.flank * 0.6 + P.recover) return 'cover';
     return 'strafe';
   }
@@ -615,8 +675,9 @@ export abstract class Enemy {
   private planApproach(player: Player, playerHead: THREE.Vector3, world: WorldRefs) {
     const P = this.persona;
     const pos = this.root.position;
-    if (Math.hypot(this.lastSeen.x - pos.x, this.lastSeen.z - pos.z) < 2.2) {
-      // 거의 다 왔다: 이제부터는 서서 둘러보며 수색
+    const d = Math.hypot(this.lastSeen.x - pos.x, this.lastSeen.z - pos.z);
+    // 너무 멀면 쫓지 않는다. 좋아하는 거리 절반까지 왔으면 그만 다가오고 그 자리를 걸어가 확인한다.
+    if (d > P.approach || d < Math.max(2.2, P.range * 0.5)) {
       this.pursuitT = 0;
       return false;
     }
@@ -628,7 +689,9 @@ export abstract class Enemy {
 
   private pickVolleys() {
     const [a, b] = this.cfg.volleysBeforeMove;
-    return a + Math.floor(this.rand() * (b - a + 1));
+    // 성향에 따라 더 서서 쏘고, 다가갈 거리 밖이면 한 번 더 쏜다
+    const far = this.root.position.distanceTo(this.lastSeen) > this.persona.approach ? 1 : 0;
+    return a + Math.floor(this.rand() * (b - a + 1)) + this.persona.hold + far;
   }
 
   /**
@@ -652,7 +715,8 @@ export abstract class Enemy {
       const ang = base + side * Math.PI * THREE.MathUtils.lerp(M.ang[0], M.ang[1], this.rand());
       let r = THREE.MathUtils.lerp(d0, d1, this.rand()) * (dodge ? 1.1 : 1);
       // 다가갈 때는 목표 바로 앞(1.5m)까지만
-      if (kind === 'push') r = Math.min(r, dist - 1.5);
+      // 다가갈 때도 바로 앞까지는 안 간다(좋아하는 거리의 60%까지)
+      if (kind === 'push') r = Math.min(r, dist - Math.max(1.5, P.range * 0.6));
       if (r < 0.6) continue;
       const p = new THREE.Vector3(pos.x + Math.sin(ang) * r, 0, pos.z + Math.cos(ang) * r);
       if (!inArea(p.x, p.z, 0.8) || !this.pathClear(pos, p, world.colliders)) continue;
@@ -719,7 +783,7 @@ export abstract class Enemy {
 
   /** 고개(몸통) 스프링: 사람처럼 가속/감속(목표가 바뀌어도 순간이동하지 않는다) */
   protected springHead(dt: number) {
-    const k = this.cfg.headSpring;
+    const k = this.cfg.headSpring * (this.state === 'combat' ? this.cfg.combatSpringMul : 1);
     this.headVel += (k * k * (this.headTarget - this.headYaw) - 2 * k * this.headVel) * dt;
     this.headYaw += this.headVel * dt;
     this.twist += (this.twistTarget - this.twist) * (1 - Math.exp(-8 * dt));
@@ -843,7 +907,6 @@ export class GunnerEnemy extends Enemy {
       if (!m.isMesh) return;
       m.castShadow = true;
       m.receiveShadow = true;
-      m.frustumCulled = false;
       const mats = (Array.isArray(m.material) ? m.material : [m.material]).map((src) => {
         const c = (src as THREE.MeshStandardMaterial).clone();
         patchGrey(c, this.greyU);
@@ -883,6 +946,8 @@ export class GunnerEnemy extends Enemy {
     this.gun.position.set(0, 0.04 / hs, -0.02 / hs);
     hand.add(this.gun);
     this.muzzle = this.gun.getObjectByName('Muzzle')!;
+
+    fitCullSpheres(this.model);
 
     // 피격 박스
     const boxMat = new THREE.MeshBasicMaterial({ visible: false });

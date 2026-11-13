@@ -159,19 +159,23 @@ export const ENEMY = {
   realignAngle: THREE.MathUtils.degToRad(25),
   /** 고개 돌리는 스프링 강성(클수록 빠름). 4.5면 60° 돌리는 데 약 1초, 최고 속도 약 100°/s */
   headSpring: 4.5,
+  /** 전투 중 고개(로봇은 렌즈 달린 몸통) 스프링 배율 */
+  combatSpringMul: 1,
   /** 한 방향을 보고 멈춰 있는 시간 범위(초) */
   glanceHold: [0.4, 0.9] as [number, number],
   /** 시야: 전체 각도와 거리 */
   fov: THREE.MathUtils.degToRad(110),
   sightRange: 30,
+  /** 이 거리(m) 안에서만 쏜다. 더 멀면 보기만 하다가(맞았거나 다가갈 거리면) 다가온다 */
+  fireRange: 16,
   sightInterval: 0.2,
   /** 발견 후 팔을 다 드는 시간 */
   raiseTime: 0.35,
   /** 이 각도 안으로 조준되면 발사 */
   fireAngle: THREE.MathUtils.degToRad(4),
   burst: 3,
-  burstInterval: 0.2,
-  burstPause: [0.8, 1.3] as [number, number],
+  burstInterval: 0.4,
+  burstPause: [1.3, 2.0] as [number, number],
   spread: THREE.MathUtils.degToRad(2),
   /** 시야를 잃은 뒤(또는 소리를 들은 뒤) 그곳에 가서 둘러보는 시간 */
   searchTime: 4,
@@ -183,7 +187,7 @@ export const ENEMY = {
   dodgeSpeed: 1.8,
   dodgeCooldown: 1.2,
   coverChance: 0.65,
-  coverHold: [0.8, 1.8] as [number, number],
+  coverHold: [0.5, 1.2] as [number, number],
   /** 수색: 마지막으로 본 곳까지 걸어가는 속도 */
   searchSpeed: 1.0,
   /** 발견하거나 맞으면 이 반경 안의 동료에게 알린다 */
@@ -198,6 +202,13 @@ export const ENEMY = {
   senseInterval: 0.25,
   /** 시야를 잃을 때 주인공이 달아나던 방향으로 몇 초 앞을 짐작할지 */
   predictTime: 0.8,
+  /** 성능: 이 거리(m)보다 멀거나 화면 밖인 적은 자세를 animSkip 프레임에 한 번 갱신 */
+  animFarDistance: 25,
+  animSkip: 3,
+  /** 성능: 화면 안 적이 벽에 가려졌는지 검사하는 간격(초) */
+  occlusionInterval: 0.1,
+  /** 성능: 이 거리(m) 안의 적만 그림자를 드리운다 */
+  shadowDistance: 20,
   /** 이동하며 쏠 때 퍼짐 배율 */
   moveSpread: 1.7,
   radius: 0.4 * 0.5,
@@ -238,8 +249,17 @@ export const ENEMY2 = {
   fireAngle: THREE.MathUtils.degToRad(3),
   /** 레이저: 충전 시간, 발사 뒤 쉬는 시간, 퍼짐 */
   chargeTime: 0.55,
-  laserPause: [1.3, 2.1] as [number, number],
+  laserPause: [1.9, 2.9] as [number, number],
   spread: THREE.MathUtils.degToRad(1.2),
+  /**
+   * 레이저 조준 보정: 렌즈(몸통)는 스프링으로 천천히 돌아서 움직이는 주인공보다 늦다.
+   * 발사할 때 렌즈 방향에서 이 각도까지는 실제 목표 쪽으로 꺾어 쏜다(렌즈가 대충 맞으면 맞힌다).
+   */
+  trackAssist: THREE.MathUtils.degToRad(10),
+  /** 전투 중 몸통(렌즈)을 두 배 빠르게 돌린다 */
+  combatSpringMul: 2,
+  /** 목표를 이 시간(초)만큼 늦게 따라간다. 걸으면 가끔, 뛰거나 방향을 틀면 피할 수 있다 */
+  aimLag: 0.05,
   radius: 0.42 * 0.7,
   height: 1.5 * 0.7,
 };
@@ -257,12 +277,14 @@ export type EnemyConfig = typeof ENEMY;
  * - pursuit: 놓친 뒤 쫓아오며 다시 찾는 시간(초)
  * - push / flank / peek: 쫓아올 때 고르는 방식의 비중(곧장 다가오기 / 옆으로 돌아 들어오기 / 엄폐물 가장자리에서 내다보기)
  * - recover: 쏜 뒤 다시 엄폐로 들어가는 비중(내다보고 쏘고 숨기)
+ * - approach: 이 거리(m) 안일 때만 주인공 쪽으로 다가온다. 더 멀면 경보/총소리에 돌아보기만 하고 순찰로 돌아가며, 보이면 그 자리 근처에서 쏜다
+ * - hold: 자리를 옮기기 전 더 쏘는 횟수(서서 쏘기를 좋아하는 정도)
  */
 export const ENEMY_STYLES = {
-  rusher: { aggression: 0.9, reaction: 0.18, range: 5, dodge: 0.3, coverChance: 0.3, coverMul: 0.5, moveFire: true, pursuit: 14, speedMul: 1.15, push: 0.7, flank: 0.2, peek: 0.1, recover: 0.05 },
-  rifleman: { aggression: 0.55, reaction: 0.24, range: 10, dodge: 0.55, coverChance: 0.55, coverMul: 1, moveFire: true, pursuit: 10, speedMul: 1, push: 0.45, flank: 0.25, peek: 0.3, recover: 0.2 },
-  flanker: { aggression: 0.7, reaction: 0.22, range: 8, dodge: 0.5, coverChance: 0.45, coverMul: 0.8, moveFire: true, pursuit: 12, speedMul: 1.1, push: 0.2, flank: 0.7, peek: 0.1, recover: 0.1 },
-  cautious: { aggression: 0.3, reaction: 0.3, range: 13, dodge: 0.85, coverChance: 0.85, coverMul: 1.5, moveFire: false, pursuit: 8, speedMul: 0.92, push: 0.2, flank: 0.15, peek: 0.65, recover: 0.5 },
+  rusher: { aggression: 0.9, reaction: 0.18, range: 5, dodge: 0.3, coverChance: 0.3, coverMul: 0.5, moveFire: true, pursuit: 14, speedMul: 1.15, push: 0.7, flank: 0.2, peek: 0.1, recover: 0.05, approach: 18, hold: 0 },
+  rifleman: { aggression: 0.55, reaction: 0.24, range: 10, dodge: 0.55, coverChance: 0.55, coverMul: 1, moveFire: true, pursuit: 10, speedMul: 1, push: 0.45, flank: 0.25, peek: 0.3, recover: 0.2, approach: 14, hold: 1 },
+  flanker: { aggression: 0.7, reaction: 0.22, range: 8, dodge: 0.5, coverChance: 0.45, coverMul: 0.8, moveFire: true, pursuit: 12, speedMul: 1.1, push: 0.2, flank: 0.7, peek: 0.1, recover: 0.1, approach: 16, hold: 0 },
+  cautious: { aggression: 0.3, reaction: 0.3, range: 13, dodge: 0.85, coverChance: 0.85, coverMul: 1.2, moveFire: false, pursuit: 8, speedMul: 0.92, push: 0.2, flank: 0.15, peek: 0.65, recover: 0.5, approach: 11, hold: 0 },
 };
 export type EnemyStyle = keyof typeof ENEMY_STYLES;
 /** 배치 순서(이 순서를 섞어서 돌려 쓴다): 소총수가 가장 많다 */
@@ -357,6 +379,8 @@ export const PERF = {
   fogFar: 40,
   /** 미니맵 갱신 줄이기: 초당 횟수 */
   minimapHz: 10,
+  /** 해 그림자 맵을 몇 프레임에 한 번 다시 그릴지(맵 전체를 덮어서 비싸다. 2면 움직이는 그림자가 1/60초 늦는 정도) */
+  shadowEvery: 2,
 };
 
 /** 모바일 터치 조작 */
@@ -412,7 +436,7 @@ export const MINIMAP = {
 /** 탄창 아이템 */
 export const PICKUP = {
   /** 주우면 늘어나는 예비 탄약 */
-  ammo: 30,
+  ammo: 60,
   /** 줍는 거리(수평, m) */
   radius: 0.8,
   /** 바닥에서 떠 있는 높이(탄창 중심), 위아래 흔들림 */
@@ -460,12 +484,12 @@ export const MAPS: MapDef[] = [
   {
     id: 'arena', name: '컨테이너 기지', desc: '좁은 통로와 2층 발판이 얽힌 근접전 맵', size: '23 × 45m',
     thumb: 'images/map_arena.webp', glb: 'models/map.glb', colliders: 'models/map_colliders.json',
-    enemies: [6, 4], pickups: 5, medkits: 3, fog: [45, 110],
+    enemies: [8, 5], pickups: 5, medkits: 3, fog: [45, 110],
   },
   {
     id: 'backrooms', name: '백룸', desc: '끝없이 이어지는 노란 사무실 방과 아치 통로', size: '75 × 20m',
     thumb: 'images/map_backrooms.webp', glb: 'models/map_backrooms.glb', colliders: 'models/map_backrooms_colliders.json',
-    enemies: [12, 8], pickups: 10, medkits: 6, fog: [10, 42],
+    enemies: [16, 11], pickups: 10, medkits: 6, fog: [10, 42],
     // 복도 옆 작은 방(의자, 책장)에서 문(+Z, 복도) 쪽을 보고 시작: 복도에 바로 서면 시작하자마자 적 눈에 띈다
     spawn: { x: 0, z: 0.6, yaw: 180 },
     indoor: { color: 0x8c8250, hemiSky: 0xfff0b8, hemiGround: 0x8a7440, hemi: 2.2 },
@@ -473,7 +497,7 @@ export const MAPS: MapDef[] = [
   {
     id: 'desert', name: '사막 마을', desc: '사암 건물 사이 세 갈래 골목과 가운데 광장', size: '46 × 54m',
     thumb: 'images/map_desert.webp', glb: 'models/map_desert.glb', colliders: 'models/map_desert_colliders.json',
-    enemies: [8, 6], pickups: 7, medkits: 4, fog: [55, 130],
+    enemies: [11, 8], pickups: 7, medkits: 4, fog: [55, 130],
     // 남쪽 끝 낮은 담 뒤에서 북쪽(-Z)을 보고 시작
     spawn: { x: 0, z: 22, yaw: 0 },
     area: [-22.6, -26.6, 22.6, 26.6],
@@ -481,7 +505,7 @@ export const MAPS: MapDef[] = [
   {
     id: 'port', name: '항구 창고', desc: '선반 통로가 있는 큰 창고와 컨테이너 야적장, 연료 탱크', size: '52 × 56m',
     thumb: 'images/map_port.webp', glb: 'models/map_port.glb', colliders: 'models/map_port_colliders.json',
-    enemies: [9, 7], pickups: 8, medkits: 5, fog: [50, 125],
+    enemies: [12, 9], pickups: 8, medkits: 5, fog: [50, 125],
     // 남쪽 정문 안쪽 방호벽 뒤에서 북쪽(창고)을 보고 시작
     spawn: { x: 0, z: 26, yaw: 0 },
     area: [-25.6, -25.4, 25.6, 29.6],
@@ -489,7 +513,7 @@ export const MAPS: MapDef[] = [
   {
     id: 'test', name: '시험장', desc: '엄폐 상자와 표적판이 있는 연습 맵', size: '86 × 86m',
     thumb: '', glb: null, colliders: null,
-    enemies: [ENEMY.count, ENEMY2.count], pickups: 4, medkits: 3, fog: [60, 160],
+    enemies: [Math.round(ENEMY.count * 4 / 3), Math.round(ENEMY2.count * 4 / 3)], pickups: 4, medkits: 3, fog: [60, 160],
   },
 ];
 export const mapById = (id: string | null) => MAPS.find((m) => m.id === id);

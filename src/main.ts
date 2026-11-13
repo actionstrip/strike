@@ -392,6 +392,7 @@ function shoot() {
   }
 }
 
+let shadowFrame = 0;
 let lastStepAt = 0;
 function frame(now = performance.now()) {
   requestAnimationFrame(frame);
@@ -461,7 +462,7 @@ function step(dt: number, rawDt: number) {
   ghostShown = ghost;
   viewmodel.ghost = ghost;
   playerHead.set(player.pos.x, player.pos.y + THREE.MathUtils.lerp(EYE_HEIGHT, EYE_HEIGHT_CROUCH, player.crouchBlend) + 0.08, player.pos.z);
-  enemies.update(dt, player, playerHead, world, enemyHooks);
+  enemies.update(dt, player, playerHead, world, enemyHooks, camRig.camera);
   // 날아가던 아이템은 쓰러진 동안에도 마저 움직이게, 줍기만 막는다
   pickups.update(dt, player.pos, (it) => {
     if (deadT > 0) return false;
@@ -515,6 +516,9 @@ function step(dt: number, rawDt: number) {
   const tRender = performance.now();
   renderer.info.reset();
   renderer.clear();
+  // 해 그림자 맵은 PERF.shadowEvery 프레임에 한 번만 다시 그린다
+  renderer.shadowMap.autoUpdate = false;
+  if (++shadowFrame >= PERF.shadowEvery) { shadowFrame = 0; renderer.shadowMap.needsUpdate = true; }
   renderer.render(world.scene, cam);
   if (camRig.showViewmodel) {
     renderer.clearDepth();
