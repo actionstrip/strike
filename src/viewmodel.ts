@@ -30,8 +30,12 @@ export class Viewmodel {
     uSightC: { value: new THREE.Vector2() },
     uSightR: { value: new THREE.Vector2(1, 2) },
     uSightA: { value: 1 },
+    /** 무적 중 전체 투명도 */
+    uGhost: { value: 1 },
   };
   private ads = 0;
+  /** 무적 중 팔과 총 전체 투명도(1이면 불투명) */
+  ghost = 1;
 
   constructor(assets: Assets) {
     this.camera = new THREE.PerspectiveCamera(FOV.viewmodel, 1, 0.01, 10);
@@ -53,10 +57,10 @@ export class Viewmodel {
         mat.transparent = true;
         mat.onBeforeCompile = (shader) => {
           Object.assign(shader.uniforms, this.sightU);
-          shader.fragmentShader = 'uniform vec2 uSightC;\nuniform vec2 uSightR;\nuniform float uSightA;\n' +
+          shader.fragmentShader = 'uniform vec2 uSightC;\nuniform vec2 uSightR;\nuniform float uSightA;\nuniform float uGhost;\n' +
             shader.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
   float sightK = 1.0 - smoothstep(uSightR.x, uSightR.y, distance(gl_FragCoord.xy, uSightC));
-  gl_FragColor.a *= mix(1.0, uSightA, sightK);`);
+  gl_FragColor.a *= mix(1.0, uSightA, sightK) * uGhost;`);
         };
         m.material = mat;
       });
@@ -127,7 +131,8 @@ export class Viewmodel {
     this.sightU.uSightC.value.set((_v.x * 0.5 + 0.5) * size.x, (_v.y * 0.5 + 0.5) * size.y);
     this.sightU.uSightR.value.set(VIEWMODEL_ADS_SIGHT.inner * size.y, VIEWMODEL_ADS_SIGHT.outer * size.y);
     this.sightU.uSightA.value = THREE.MathUtils.lerp(1, VIEWMODEL_ADS_SIGHT.alpha, this.ads);
-    const fading = this.sightU.uSightA.value < 0.999;
+    this.sightU.uGhost.value = this.ghost;
+    const fading = this.sightU.uSightA.value < 0.999 || this.ghost < 0.999;
     if (fading) {
       for (const f of this.fadeMats) { f.mat.colorWrite = false; f.mat.depthWrite = f.depthWrite; }
       // 총구 화염처럼 나중에 붙은 것은 깊이 패스에서 빼야 두 번 그려지지 않는다

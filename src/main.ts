@@ -174,6 +174,10 @@ let playerHits = 0;
 let hp = PLAYER_HEALTH.max;
 /** 쓰러진 뒤 다시 일어나기까지 남은 시간(0 이하면 살아 있음) */
 let deadT = 0;
+/** 처음 시작하거나 다시 태어난 뒤 남은 무적 시간(초) */
+let protectT = 0;
+/** 지난 프레임에 몸에 건 투명도(1이 아니면 무적 표시 중) */
+let ghostShown = 1;
 /** 디버그: 적 총알이 플레이어를 맞히지 않게 한다 */
 let godMode = false;
 /** 게임 클리어(포털에 들어감). 이후로는 움직이거나 맞지 않는다. */
@@ -223,6 +227,7 @@ function respawn() {
   weapon.reserve = Math.max(weapon.reserve, WEAPON.reserve);
   weapon.reloadT = -1;
   hud.setDead(false);
+  protectT = PLAYER_HEALTH.spawnProtect;
 }
 const enemyHooks: EnemyHooks = {
   onFire(_e: Enemy, from: THREE.Vector3, dir: THREE.Vector3, kind: EnemyWeapon) {
@@ -244,7 +249,7 @@ const enemyHooks: EnemyHooks = {
       effects.tracer(from, end);
       sfx.enemyShot(from.distanceTo(player.pos));
     }
-    if (pDist < wallDist && !godMode && deadT <= 0 && !cleared) {
+    if (pDist < wallDist && !godMode && deadT <= 0 && protectT <= 0 && !cleared) {
       playerHits++;
       hud.showDamage(from, player.pos, player.yaw);
       sfx.hurt();
@@ -267,14 +272,16 @@ const enemyHooks: EnemyHooks = {
 };
 
 let started = false;
-/** 모바일 일시정지(시작 화면을 다시 띄운 동안, 또는 세로로 든 동안) */
-let paused = false;
+/** 일시정지: 시작 화면(처음 들어왔을 때 포함)이 떠 있는 동안. 모바일은 세로로 든 동안도 멈춘다. */
+let paused = true;
+/** 일시정지 중에도 화면이 비지 않게 한 번은 그린다(처음 들어왔을 때, 창 크기가 바뀌었을 때) */
+let pausedDrawn = false;
 const portraitMq = matchMedia('(orientation: portrait)');
 
 /** 게임 시작/재개(PC는 Pointer Lock이 잡힐 때, 모바일은 시작 화면을 탭할 때) */
 function startGame() {
   // 처음 시작할 때: 포털에서 방금 나온 것처럼 번쩍인다
-  if (!started) { portal.flash(); sfx.portalWhoosh(); }
+  if (!started) { portal.flash(); sfx.portalWhoosh(); protectT = PLAYER_HEALTH.spawnProtect; }
   started = true;
   paused = false;
   startEl.classList.add('hidden');
@@ -286,7 +293,9 @@ function showStartPanel() {
   // 클리어 뒤에는 시작 화면 대신 결과 화면을 둔다. 성능 패널을 열려고 잠금을 푼 것이면 그대로 둔다.
   if (cleared || perfPanel.open) return;
   startEl.classList.remove('hidden');
-  if (isMobile) { paused = true; touch?.show(false); }
+  paused = true;
+  pausedDrawn = false;
+  touch?.show(false);
 }
 
 startEl.addEventListener('click', () => {
@@ -317,6 +326,7 @@ function resize() {
   camRig.camera.aspect = innerWidth / innerHeight;
   camRig.camera.updateProjectionMatrix();
   viewmodel.setAspect(innerWidth / innerHeight);
+  pausedDrawn = false;
 }
 addEventListener('resize', resize);
 resize();
@@ -390,7 +400,12 @@ function frame(now = performance.now()) {
   lastStepAt = now;
   const rawDt = Math.min(clock.getDelta(), 0.05);
   // 모바일 일시정지 중, 또는 세로로 든 동안(회전 안내가 화면을 덮는다)에는 시뮬레이션을 멈춘다
-  if (paused || (isMobile && portraitMq.matches)) { input.endFrame(); return; }
+  // 시작 화면이 떠 있는 동안(처음 들어왔을 때 포함)도 멈춘다. 멈춘 화면은 한 번만 그려 둔다.
+  if (paused || (isMobile && portraitMq.matches)) {
+    if (!pausedDrawn) { pausedDrawn = true; step(0, 0); }
+    input.endFrame();
+    return;
+  }
   step(rawDt * timeScale, rawDt);
 }
 
@@ -437,6 +452,14 @@ function step(dt: number, rawDt: number) {
     aimTarget.set(0, 0, -50).applyQuaternion(cam.quaternion).add(cam.position);
   }
   character.update(dt, player, weapon, aimTarget);
+  // 무적: 몸과 총이 깜박깜박(흐렸다 진했다). 끝나기 1.5초 전부터 더 빨리 깜박인다.
+  if (deadT <= 0 && !cleared) protectT = Math.max(0, protectT - dt);
+  const PH = PLAYER_HEALTH;
+  const blinkOn = Math.floor(protectT * (protectT < 1.5 ? PH.fastBlink : PH.blinkRate) * 2) % 2 === 0;
+  const ghost = protectT <= 0 ? 1 : blinkOn ? PH.ghostAlphaHigh : PH.ghostAlpha;
+  if (ghost < 1 || ghostShown < 1) character.setGhost(ghost);
+  ghostShown = ghost;
+  viewmodel.ghost = ghost;
   playerHead.set(player.pos.x, player.pos.y + THREE.MathUtils.lerp(EYE_HEIGHT, EYE_HEIGHT_CROUCH, player.crouchBlend) + 0.08, player.pos.z);
   enemies.update(dt, player, playerHead, world, enemyHooks);
   // 날아가던 아이템은 쓰러진 동안에도 마저 움직이게, 줍기만 막는다
@@ -537,6 +560,8 @@ const debug = {
   start() { startGame(); sfx.unlock(); },
   /** 모바일 일시정지 상태 */
   paused() { return paused || (isMobile && portraitMq.matches); },
+  /** 남은 무적 시간(초) */
+  protect() { return protectT; },
   setView(v: View) { setView(v); camRig.viewBlend = v === 'tp' ? 1 : 0; },
   /** x=오른쪽, z=앞 (-1..1). treadmill이면 제자리에서 애니메이션만 */
   setMove(x: number, z: number, sprint = false, treadmill = true) {

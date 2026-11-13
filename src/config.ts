@@ -276,6 +276,13 @@ export const PLAYER_HEALTH = {
   laser: 5,//14,
   /** 쓰러진 뒤 시작점에서 다시 일어나기까지(초) */
   respawnDelay: 2.5,
+  /** 처음 시작하거나 다시 태어난 뒤 무적 시간(초). 그동안 몸과 총이 반투명하다. */
+  spawnProtect: 5,
+  /** 무적 중 깜박임: 흐릴 때와 진할 때 투명도(0 투명 ~ 1 불투명), 초당 깜박임 수(끝나기 1.5초 전부터는 fastBlink) */
+  ghostAlpha: 0.15,
+  ghostAlphaHigh: 0.85,
+  blinkRate: 5,
+  fastBlink: 10,
 };
 
 /** 구급상자 아이템 */

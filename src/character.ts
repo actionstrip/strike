@@ -120,6 +120,31 @@ export class Character {
     return this.gun.muzzle.getWorldPosition(out);
   }
 
+  /**
+   * 몸과 총을 반투명하게(alpha < 1) 또는 원래대로(1). 단순 재질로 바뀐 재질에도 적용되도록 지금 붙은 재질에 매번 건다.
+   * 처음부터 투명한 재질(총구 화염 등)은 코드가 따로 다루므로 건드리지 않는다.
+   */
+  setGhost(alpha: number) {
+    const ghost = alpha < 0.999;
+    for (const root of [this.rig.model, this.gun.root]) {
+      root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.material) return;
+        for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+          let base = mat.userData.ghostBase as { transparent: boolean; opacity: number; depthWrite: boolean } | undefined;
+          if (!base) base = mat.userData.ghostBase = { transparent: mat.transparent, opacity: mat.opacity, depthWrite: mat.depthWrite };
+          if (base.transparent) continue;
+          if (mat.transparent !== ghost) {
+            mat.transparent = ghost;
+            mat.needsUpdate = true;
+          }
+          mat.opacity = ghost ? base.opacity * alpha : base.opacity;
+          mat.depthWrite = ghost ? false : base.depthWrite;
+        }
+      });
+    }
+  }
+
   setVisibleLayer(layer: number) {
     this.rig.model.traverse((o) => o.layers.set(layer));
     this.gun.root.traverse((o) => o.layers.set(layer));
